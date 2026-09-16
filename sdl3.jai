@@ -28,6 +28,9 @@ SDL_WindowID :: u32;
 
 SDL_Scancode :: enum u32 {
         I :: 12;
+	BACKSPACE :: 42;
+	RIGHT :: 79;
+	LEFT :: 80;
 };
 SDL_Keycode :: u32;
 SDL_Keymod :: enum u16 {

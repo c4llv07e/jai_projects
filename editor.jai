@@ -5,13 +5,15 @@
 
 cool :: true;
 
+Acme_Element :: struct {
+	using buffer: Text_Buffer;
+	height: float;
+};
+
 Acme_Indent :: struct {
         rows: [..]struct {
                 width: float;
-                columns: [..]struct {
-                        using buffer: Text_Buffer;
-                        height: float;
-                };
+                columns: [..]Acme_Element;
         };
         selected_row: s32;
         selected_col: s32;
@@ -99,20 +101,29 @@ fill_rect :: (using ctx: *Ctx, rect :SDL_FRect, color: SDL_Color) {
 
 postprocessing :: (using ctx: *Ctx) {
         y : float = 0;
-        panel_height :: 2.0;
+        panel_height :: 4.0;
         while xx y < height {
-                fill_rect(ctx, .{0, y, xx width, panel_height}, .{0x10, 0x10, 0x10, 0x50});
+                fill_rect(ctx, .{0, y, xx width, panel_height}, .{0x10, 0x10, 0x10, 0x20});
                 y += panel_height * 2;
         }
 }
 
-append_text :: (using buffer: *Text_Buffer, str: string, position: s32) {
+append_text :: (using buffer: *Text_Buffer, str: string, position: s64) {
+	// TODO(c4llv07e): This should be done with dynamic array as a string, but I am not sure what's the best way to do it in jai.
+	// Maybe I should check modules, maybe there's already implemented such structure.
 	before := text;
 	before.count = position;
 	after := text;
 	after.count -= position;
 	after.data += position;
-	text = sprint("%1%2%3", before, str, after);
+	new_text := sprint("%1%2%3", before, str, after);
+	free(text);
+	text = new_text;
+}
+
+delete_char :: (using buffer: *Text_Buffer, position: s64) {
+	memcpy(text.data + position, text.data + position + 1, text.count - position - 1);
+	text.count -= 1;
 }
 
 recalculate_sizes :: (using ctx: *Ctx, new_width: s32, new_height: s32) {
@@ -180,11 +191,11 @@ main :: () {
                           width = xx width,
                   });
         array_add(*acme.rows[0].columns, .{
-                          text = "Hello world",
+                          text = copy_string("Hello world"),
                           height = xx (height / 2),
                   });
         array_add(*acme.rows[0].columns, .{
-                          text = "Second panel",
+                          text = copy_string("Second panel"),
                           height = xx (height / 2),
                   });
         print("Entering main loop...\n");
@@ -192,6 +203,9 @@ main :: () {
         event: SDL_Event;
 	text_width : s32 = 15;
         while is_running {
+		selected_column :: () -> *Acme_Element #expand {
+			return *(acme.rows[acme.selected_row].columns[acme.selected_col]);
+		}
 		selected_buffer :: () -> *Text_Buffer #expand {
 			return *(acme.rows[acme.selected_row].columns[acme.selected_col].buffer);
 		}
@@ -201,17 +215,30 @@ main :: () {
                                 is_running = false;
                                 break event_handler;
                                 case .KEY_DOWN;
-                                if event.key.scancode == .I {
+                                if event.key.scancode == {
+					case .I;
                                         if event.key.mod & .CTRL {
                                                 acme.selected_col = cast(s32)((acme.selected_col + 1) % acme.rows[acme.selected_row].columns.count);
                                         }
+					case .LEFT;
+					if selected_buffer().cursor > 0
+						selected_buffer().cursor -= 1;
+					case .RIGHT;
+					if selected_buffer().cursor < selected_buffer().text.count
+						selected_buffer().cursor += 1;
+					case .BACKSPACE;
+					if selected_buffer().cursor > 0 {
+						delete_char(selected_buffer(), xx selected_buffer().cursor - 1);
+						selected_buffer().cursor -= 1;
+					}
                                 }
 				case .WINDOW_PIXEL_SIZE_CHANGED;
 				recalculate_sizes(*ctx, event.window.data1, event.window.data2);
                                 case .KEY_UP;
 				case .TEXT_INPUT;
 				text := to_string(event.text.text);
-				append_text(selected_buffer(), text, 0);
+				append_text(selected_buffer(), text, xx selected_buffer().cursor);
+				selected_buffer().cursor += text.count;
 				case .MOUSE_WHEEL;
 				text_width += event.wheel.integer_y;
                         }
@@ -235,7 +262,7 @@ main :: () {
 				}
 				rect_line(*ctx, .{x, y, row.width, col.height}, border_color);
                                 render_text_wrapped(*ctx, x, y, color, col.text, xx row.width);
-				line_x, line_y := wrap_text(*ctx, col.text, xx row.width);
+				line_x, line_y := wrap_text(*ctx, substring(col.text, min(col.text.count, col.cursor)), xx row.width);
 				fill_rect(*ctx, .{x + line_x, y + line_y, 4, xx font_height}, .{0x99, 0x00, 0x00, 0xff});
                                 y += col.height;
                         }

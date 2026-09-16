@@ -1,0 +1,36 @@
+version(2);
+project_name = "editor";
+patterns = {
+"*.jai",
+"*.4coder",
+};
+blacklist_patterns = {
+".*",
+};
+load_paths_base = {
+ { ".", .relative = true, .recursive = true, },
+};
+load_paths = {
+ .win = load_paths_base,
+ .linux = load_paths_base,
+ .mac = load_paths_base,
+};
+
+commands = {
+ .build = { .out = "*compilation*", .footer_panel = true, .save_dirty_files = true,
+   .win = "build.bat",
+   .linux = "./build.sh",
+   .mac = "./build.sh", },
+ .run = { .out = "*run*", .footer_panel = false, .save_dirty_files = false,
+   .win = "editor",
+   .linux = "./editor",
+   .mac = "./editor", },
+.open_emacs = {
+   .save_dirty_files = false,
+   .linux = "emacs editor.jai", },
+};
+fkey_command = {
+.F1 = "run",
+.F5 = "build",
+.F11 = "open_emacs",
+};

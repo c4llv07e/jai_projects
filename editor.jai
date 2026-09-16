@@ -81,6 +81,28 @@ postprocessing :: (using ctx: *Ctx) {
         }
 }
 
+append_text :: (using buffer: *Text_Buffer, str: string, position: s32) {
+	before := text;
+	before.count = position;
+	after := text;
+	after.count -= position;
+	after.data += position;
+	text = sprint("%1%2%3", before, str, after);
+}
+
+recalculate_sizes :: (using ctx: *Ctx, new_width: s32, new_height: s32) {
+	dw := (cast(float)new_width) / width;
+	dh := (cast(float)new_height) / height;
+	for *row, row_index: acme.rows {
+		for *col, col_index: row.columns {
+			col.height *= dh;
+		}
+		row.width *= dw;
+	}
+	width = xx new_width;
+	height = xx new_height;
+}
+
 main :: () {
         using ctx := Ctx.{
                 width = 800,
@@ -118,6 +140,9 @@ main :: () {
         is_running = true;
         event: SDL_Event;
         while is_running {
+		selected_buffer :: () -> *Text_Buffer #expand {
+			return *(acme.rows[acme.selected_row].columns[acme.selected_col].buffer);
+		}
                 while event_handler := SDL_PollEvent(*event) {
                         if event.type == {
                                 case .QUIT;
@@ -129,10 +154,12 @@ main :: () {
                                                 acme.selected_col = cast(s32)((acme.selected_col + 1) % acme.rows[acme.selected_row].columns.count);
                                         }
                                 }
+				case .WINDOW_PIXEL_SIZE_CHANGED;
+				recalculate_sizes(*ctx, event.window.data1, event.window.data2);
                                 case .KEY_UP;
 				case .TEXT_INPUT;
 				text := to_string(event.text.text);
-				print("text = %\n", text);
+				append_text(selected_buffer(), text, 0);
                         }
                 }
                 sdl_set_color(renderer, background_color);
@@ -141,13 +168,19 @@ main :: () {
                 y: float = 0;
                 for row, row_index: acme.rows {
                         for col, col_index: row.columns {
-                                border_color : SDL_Color = ifx row_index == acme.selected_row && col_index == acme.selected_col {
+				is_selected := row_index == acme.selected_row && col_index == acme.selected_col;
+                                border_color : SDL_Color = ifx is_selected {
                                         SDL_Color.{0x00, 0xff, 0xff, 0xff};
                                 } else {
                                         SDL_Color.{0xff, 0x00, 0x00, 0xff};
                                 }
-                                rect_line(*ctx, .{x, y, row.width, col.height}, border_color);
-                                render_text(*ctx, x, y, text_color, col.text);
+				color := ifx is_selected {
+					text_color;
+				} else {
+					shadowed_text_color;
+				}
+				rect_line(*ctx, .{x, y, row.width, col.height}, border_color);
+                                render_text(*ctx, x, y, color, col.text);
                                 y += col.height;
                         }
                         x += row.width;

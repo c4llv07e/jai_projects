@@ -4,7 +4,15 @@ sdl3_ttf :: #system_library "libSDL3_ttf.so";
 
 SDL_EventType :: enum u32 {
         QUIT :: 0x100;
-        KEY_DOWN :: 0x300;
+	
+	WINDOW_SHOWN :: 0x202;
+	WINDOW_HIDDEN;
+	WINDOW_EXPOSED;
+	WINDOW_MOVED;
+	WINDOW_RESIZED;
+	WINDOW_PIXEL_SIZE_CHANGED;
+	
+	KEY_DOWN :: 0x300;
         KEY_UP;
 	TEXT_EDITING;
 	TEXT_INPUT;
@@ -38,6 +46,15 @@ SDL_Keymod :: enum u16 {
         GUI :: (SDL_Keymod.LGUI | SDL_Keymod.RGUI);
 };
 
+SDL_WindowEvent :: struct {
+	type: SDL_EventType;
+	reserved: u32;
+	timestamp: u64;
+	windowID: SDL_WindowID;
+	data1: s32;
+	data2: s32;
+};
+
 SDL_KeyboardEvent :: struct {
         type: SDL_EventType;
         reserved: u32;
@@ -63,6 +80,7 @@ SDL_TextInputEvent :: struct {
 SDL_Event :: union { 
         type: SDL_EventType;
         padding: [128]u8;
+	window: SDL_WindowEvent;
         key: SDL_KeyboardEvent;
 	text: SDL_TextInputEvent;
 };

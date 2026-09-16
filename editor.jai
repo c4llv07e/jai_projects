@@ -43,35 +43,48 @@ substring :: (s: string, n: s64) -> string {
 	return res;
 }
 
-render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string, wrap_width: s32 = 0) -> (s32, s32) {
-        surface: *SDL_Surface;
-	if wrap_width > 0 {
-		surface = TTF_RenderText_Blended_Wrapped(font, text.data, xx text.count, color, wrap_width);
-	} else {
-		surface = TTF_RenderText_Blended(font, text.data, xx text.count, color);
+render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string) -> (s32, s32) {
+        surface: *SDL_Surface = TTF_RenderText_Blended(font, text.data, xx text.count, color);
+	if surface == null {
+		print("Can't render text on surface: %\n", sdl_get_error());
+		return 0, 0;
 	}
-        if surface == null {
-                print("Can't render text on surface: %\n", sdl_get_error());
-                return 0, 0;
-        }
-        defer SDL_DestroySurface(surface);
-        texture: *SDL_Texture = SDL_CreateTextureFromSurface(renderer, surface);
-        if texture == null {
-                print("Can't convert surface to texture: %\n", sdl_get_error());
-                return 0, 0;
-        }
-        defer SDL_DestroyTexture(texture);
-        text_bounds := SDL_FRect.{
-                x = SDL_floorf(x),
-                y = SDL_floorf(y),
-                w = xx texture.w,
-                h = xx texture.h,
-        };
-        if !SDL_RenderTexture(renderer, texture, null, *text_bounds) {
-                print("Can't blit texture: %\n", sdl_get_error());
-                return 0, 0;
-        }
-        return texture.w, texture.h;
+	defer SDL_DestroySurface(surface);
+	texture: *SDL_Texture = SDL_CreateTextureFromSurface(renderer, surface);
+	if texture == null {
+		print("Can't convert surface to texture: %\n", sdl_get_error());
+		return 0, 0;
+	}
+	defer SDL_DestroyTexture(texture);
+	text_bounds := SDL_FRect.{
+		x = SDL_floorf(x),
+		y = SDL_floorf(y),
+		w = xx texture.w,
+		h = xx texture.h,
+	};
+	if !SDL_RenderTexture(renderer, texture, null, *text_bounds) {
+		print("Can't blit texture: %\n", sdl_get_error());
+		return 0, 0;
+	}
+	return texture.w, texture.h;
+}
+
+render_text_wrapped :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string, wrap_width: s32 = 0, caller_loc := #caller_location) -> (s32, s32) {
+	assert(wrap_width > 0, "You probably shouldn't use wrapped text renderer with non positive wrap value", loc = caller_loc);
+	while text.count > 0 {
+		ok, line_width, line_text_length := sdl_measure_string(font, text, wrap_width);
+		if !ok {
+			print("Error on rendering wrapped text: %\n", sdl_get_error());
+			return 0, 0;
+		}
+		text_w, text_h := render_text(ctx, x, y, color, substring(text, xx line_text_length));
+		if text.count == xx line_text_length {
+			return line_width, xx y;
+		}
+		advance(*text, xx line_text_length);
+		y += font_height;
+	}
+	return 0, xx y;
 }
 
 rect_line :: (using ctx: *Ctx, rect: SDL_FRect, color: SDL_Color) {
@@ -124,8 +137,7 @@ sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, 
 
 wrap_text :: (using ctx: *Ctx, text: string, wrap_width: s32) -> (s32, s32) {
 	y: s32 = 0;
-	while true {
-		if text.count <= 0 return 0, y;
+	while text.count > 0 {
 		ok, line_width, line_text_length := sdl_measure_string(font, text, wrap_width);
 		if !ok {
 			print("Some error on measuring text: %\n", sdl_get_error());
@@ -138,7 +150,7 @@ wrap_text :: (using ctx: *Ctx, text: string, wrap_width: s32) -> (s32, s32) {
 		y += xx font_height;
 	}
 	// unreachable.
-	return 0, 0;
+	return 0, y;
 }
 
 main :: () {
@@ -222,7 +234,7 @@ main :: () {
 					shadowed_text_color;
 				}
 				rect_line(*ctx, .{x, y, row.width, col.height}, border_color);
-                                render_text(*ctx, x, y, color, col.text, xx row.width);
+                                render_text_wrapped(*ctx, x, y, color, col.text, xx row.width);
 				line_x, line_y := wrap_text(*ctx, col.text, xx row.width);
 				fill_rect(*ctx, .{x + line_x, y + line_y, 4, xx font_height}, .{0x99, 0x00, 0x00, 0xff});
                                 y += col.height;

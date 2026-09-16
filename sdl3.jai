@@ -6,6 +6,8 @@ SDL_EventType :: enum u32 {
         QUIT :: 0x100;
         KEY_DOWN :: 0x300;
         KEY_UP;
+	TEXT_EDITING;
+	TEXT_INPUT;
 };
 
 SDL_KeyboardID :: u32;
@@ -50,10 +52,19 @@ SDL_KeyboardEvent :: struct {
         repeat: bool;
 };
 
+SDL_TextInputEvent :: struct {
+	type: SDL_EventType;
+	reserved: u32;
+	timestamp: u64;
+	windowID: SDL_WindowID;
+	text: *u8;
+};
+
 SDL_Event :: union { 
         type: SDL_EventType;
         padding: [128]u8;
         key: SDL_KeyboardEvent;
+	text: SDL_TextInputEvent;
 };
 
 SDL_Color :: struct {
@@ -112,6 +123,7 @@ SDL_Init :: (subsystems: SDL_INIT_FLAGS) -> bool #foreign sdl3;
 SDL_CreateWindow :: (title: *u8, w: int, h: int, flags: SDL_WindowFlags) -> *SDL_Window #foreign sdl3;
 SDL_CreateWindowAndRenderer :: (title: *u8, width: int, height: int, window_flags: SDL_WindowFlags, window: **void, renderer: **void) -> bool #foreign sdl3;
 SDL_PollEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
+SDL_StartTextInput :: (window: *SDL_Window) -> bool #foreign sdl3;
 SDL_SetRenderDrawColor :: (renderer: *void, r: u8, g: u8, b: u8, a: u8) -> bool #foreign sdl3;
 SDL_RenderClear :: (renderer: *void) -> bool #foreign sdl3;
 SDL_RenderPresent :: (renderer: *void) -> bool #foreign sdl3;

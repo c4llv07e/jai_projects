@@ -95,6 +95,7 @@ main :: () {
         if !SDL_SetRenderDrawBlendMode(renderer, .BLEND) { 
                 print("Can't set blend mode to blending: %\n", sdl_get_error());
         }
+	SDL_StartTextInput(window);
         if !TTF_Init() {
                 print("Can't init SDL_TTF: %\n", sdl_get_error());
         }
@@ -129,6 +130,9 @@ main :: () {
                                         }
                                 }
                                 case .KEY_UP;
+				case .TEXT_INPUT;
+				text := to_string(event.text.text);
+				print("text = %\n", text);
                         }
                 }
                 sdl_set_color(renderer, background_color);
@@ -143,7 +147,7 @@ main :: () {
                                         SDL_Color.{0xff, 0x00, 0x00, 0xff};
                                 }
                                 rect_line(*ctx, .{x, y, row.width, col.height}, border_color);
-                                render_text(*ctx, x, y, .{0x00, 0xff, 0x00, 0xff}, col.text);
+                                render_text(*ctx, x, y, text_color, col.text);
                                 y += col.height;
                         }
                         x += row.width;

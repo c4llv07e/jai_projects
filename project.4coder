@@ -19,7 +19,7 @@ load_paths = {
 commands = {
  .build = { .out = "*compilation*", .footer_panel = true, .save_dirty_files = true,
    .win = "build.bat",
-   .linux = "./build.sh",
+   .linux = "jai editor.jai",
    .mac = "./build.sh", },
  .run = { .out = "*run*", .footer_panel = false, .save_dirty_files = false,
    .win = "editor",

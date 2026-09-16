@@ -16,6 +16,11 @@ SDL_EventType :: enum u32 {
         KEY_UP;
 	TEXT_EDITING;
 	TEXT_INPUT;
+	
+	MOUSE_MOTION :: 0x400;
+	MOUSE_BUTTON_DOWN;
+	MOUSE_BUTTON_UP;
+	MOUSE_WHEEL;
 };
 
 SDL_KeyboardID :: u32;
@@ -69,6 +74,27 @@ SDL_KeyboardEvent :: struct {
         repeat: bool;
 };
 
+SDL_MouseID :: u32;
+SDL_MouseWheelDirection :: enum u32 {
+	SDL_MOUSEWHEEL_NORMAL;
+	SDL_MOUSEWHEEL_FLIPPED;
+};
+
+SDL_MouseWheelEvent :: struct {
+	type: SDL_EventType;
+	reserved: u32;
+	timestamp: u64;
+	windowID: SDL_WindowID;
+	which: SDL_MouseID;
+	x: float32;
+	y: float32;
+	direction: SDL_MouseWheelDirection;
+	mouse_x: float32;
+	mouse_y: float32;
+	integer_x: s32;
+	integer_y: s32;
+};
+
 SDL_TextInputEvent :: struct {
 	type: SDL_EventType;
 	reserved: u32;
@@ -83,6 +109,7 @@ SDL_Event :: union {
 	window: SDL_WindowEvent;
         key: SDL_KeyboardEvent;
 	text: SDL_TextInputEvent;
+	wheel: SDL_MouseWheelEvent;
 };
 
 SDL_Color :: struct {
@@ -134,7 +161,7 @@ SDL_Renderer :: void;
 SDL_Window :: void;
 
 SDL_INIT_FLAGS :: enum u32 {
-        INIT_VIDEO :: 0x00000020;
+        VIDEO :: 0x00000020;
 };
 
 SDL_Init :: (subsystems: SDL_INIT_FLAGS) -> bool #foreign sdl3;
@@ -162,6 +189,9 @@ TTF_Font :: void;
 TTF_Init :: () -> bool #foreign sdl3_ttf;
 TTF_OpenFont :: (file: *u8, ptsize: float32) -> *TTF_Font #foreign sdl3_ttf;
 TTF_RenderText_Blended :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color) -> *SDL_Surface #foreign sdl3_ttf;
+TTF_RenderText_Blended_Wrapped :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color, wrap_width: s32) -> *SDL_Surface #foreign sdl3_ttf;
+TTF_MeasureString :: (font: *TTF_Font, text: *u8, length: u64, max_width: s32, measured_width: *s32, measured_length: *u64) -> bool #foreign sdl3_ttf;
+
 
 sdl_get_error :: () -> string {
         return to_string(SDL_GetError());

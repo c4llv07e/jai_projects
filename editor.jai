@@ -26,6 +26,7 @@ Ctx :: struct {
         window: *void;
         renderer: *void;
         font: *TTF_Font;
+	font_height: u32;
         using win_size : struct {
                 width : u32;
                 height : u32;
@@ -36,17 +37,28 @@ Ctx :: struct {
 
 font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
 
-render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string) -> bool {
-        surface: *SDL_Surface = TTF_RenderText_Blended(font, text.data, xx text.count, color);
+substring :: (s: string, n: s64) -> string {
+	res : string = s;
+	res.count = n;
+	return res;
+}
+
+render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string, wrap_width: s32 = 0) -> (s32, s32) {
+        surface: *SDL_Surface;
+	if wrap_width > 0 {
+		surface = TTF_RenderText_Blended_Wrapped(font, text.data, xx text.count, color, wrap_width);
+	} else {
+		surface = TTF_RenderText_Blended(font, text.data, xx text.count, color);
+	}
         if surface == null {
                 print("Can't render text on surface: %\n", sdl_get_error());
-                return false;
+                return 0, 0;
         }
         defer SDL_DestroySurface(surface);
         texture: *SDL_Texture = SDL_CreateTextureFromSurface(renderer, surface);
         if texture == null {
                 print("Can't convert surface to texture: %\n", sdl_get_error());
-                return false;
+                return 0, 0;
         }
         defer SDL_DestroyTexture(texture);
         text_bounds := SDL_FRect.{
@@ -57,9 +69,9 @@ render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: str
         };
         if !SDL_RenderTexture(renderer, texture, null, *text_bounds) {
                 print("Can't blit texture: %\n", sdl_get_error());
-                return false;
+                return 0, 0;
         }
-        return true;
+        return texture.w, texture.h;
 }
 
 rect_line :: (using ctx: *Ctx, rect: SDL_FRect, color: SDL_Color) {
@@ -103,12 +115,39 @@ recalculate_sizes :: (using ctx: *Ctx, new_width: s32, new_height: s32) {
 	height = xx new_height;
 }
 
+sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, s32, u64) {
+	measured_width: s32;
+	measured_length: u64;
+	res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);
+	return res, measured_width, measured_length;
+}
+
+wrap_text :: (using ctx: *Ctx, text: string, wrap_width: s32) -> (s32, s32) {
+	y: s32 = 0;
+	while true {
+		if text.count <= 0 return 0, y;
+		ok, line_width, line_text_length := sdl_measure_string(font, text, wrap_width);
+		if !ok {
+			print("Some error on measuring text: %\n", sdl_get_error());
+			return 0, y;
+		}
+		if text.count == xx line_text_length {
+			return line_width, y;
+		}
+		advance(*text, cast(s64)line_text_length);
+		y += xx font_height;
+	}
+	// unreachable.
+	return 0, 0;
+}
+
 main :: () {
         using ctx := Ctx.{
                 width = 800,
                 height = 600,
+		font_height = 24,
         };
-        if !SDL_Init(.INIT_VIDEO) {
+        if !SDL_Init(.VIDEO) {
                 print("Can't init SDL: %\n", sdl_get_error());
         }
         if !SDL_CreateWindowAndRenderer("editor", ctx.width, ctx.height, .RESIZABLE, *ctx.window, *ctx.renderer) {
@@ -121,7 +160,7 @@ main :: () {
         if !TTF_Init() {
                 print("Can't init SDL_TTF: %\n", sdl_get_error());
         }
-        font = TTF_OpenFont(font_path.data, 24);
+        font = TTF_OpenFont(font_path.data, xx font_height);
         if font == null {
                 print("Can't load font at %: %\n", font_path, sdl_get_error());
         }
@@ -139,6 +178,7 @@ main :: () {
         print("Entering main loop...\n");
         is_running = true;
         event: SDL_Event;
+	text_width : s32 = 15;
         while is_running {
 		selected_buffer :: () -> *Text_Buffer #expand {
 			return *(acme.rows[acme.selected_row].columns[acme.selected_col].buffer);
@@ -160,6 +200,8 @@ main :: () {
 				case .TEXT_INPUT;
 				text := to_string(event.text.text);
 				append_text(selected_buffer(), text, 0);
+				case .MOUSE_WHEEL;
+				text_width += event.wheel.integer_y;
                         }
                 }
                 sdl_set_color(renderer, background_color);
@@ -180,7 +222,9 @@ main :: () {
 					shadowed_text_color;
 				}
 				rect_line(*ctx, .{x, y, row.width, col.height}, border_color);
-                                render_text(*ctx, x, y, color, col.text);
+                                render_text(*ctx, x, y, color, col.text, xx row.width);
+				line_x, line_y := wrap_text(*ctx, col.text, xx row.width);
+				fill_rect(*ctx, .{x + line_x, y + line_y, 4, xx font_height}, .{0x99, 0x00, 0x00, 0xff});
                                 y += col.height;
                         }
                         x += row.width;
@@ -189,6 +233,6 @@ main :: () {
 #if cool {
                         postprocessing(*ctx);
                 }
-                SDL_RenderPresent(renderer);
+		SDL_RenderPresent(renderer);
         }
 }

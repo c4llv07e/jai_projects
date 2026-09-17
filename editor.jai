@@ -25,21 +25,22 @@ Text_Buffer :: struct {
 };
 
 Ctx :: struct {
-        window: *void;
-        renderer: *void;
+        window: *SDL_Window;
+        renderer: *SDL_Renderer;
         font: *TTF_Font;
-	font_height: u32;
         using win_size : struct {
                 width : u32;
                 height : u32;
         };
-        is_running: bool;
+	is_ctrl_held: bool = false;
+        is_running: bool = false;;
         acme: Acme_Indent;
 };
 
 font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
 
 substring :: (s: string, n: s64) -> string {
+	assert(s.count >= n);
 	res : string = s;
 	res.count = n;
 	return res;
@@ -73,6 +74,8 @@ render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: str
 
 render_text_wrapped :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string, wrap_width: s32 = 0, caller_loc := #caller_location) -> (s32, s32) {
 	assert(wrap_width > 0, "You probably shouldn't use wrapped text renderer with non positive wrap value", loc = caller_loc);
+	font_height := TTF_GetFontSize(font);
+	assert(font_height > 0.0, "Can't get font size.");
 	while text.count > 0 {
 		ok, line_width, line_text_length := sdl_measure_string(font, text, wrap_width);
 		if !ok {
@@ -148,6 +151,8 @@ sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, 
 
 wrap_text :: (using ctx: *Ctx, text: string, wrap_width: s32) -> (s32, s32) {
 	y: s32 = 0;
+	font_height := TTF_GetFontSize(font);
+	assert(font_height > 0.0, "We can't get font size for some reason.");
 	while text.count > 0 {
 		ok, line_width, line_text_length := sdl_measure_string(font, text, wrap_width);
 		if !ok {
@@ -168,7 +173,6 @@ main :: () {
         using ctx := Ctx.{
                 width = 800,
                 height = 600,
-		font_height = 24,
         };
         if !SDL_Init(.VIDEO) {
                 print("Can't init SDL: %\n", sdl_get_error());
@@ -183,7 +187,7 @@ main :: () {
         if !TTF_Init() {
                 print("Can't init SDL_TTF: %\n", sdl_get_error());
         }
-        font = TTF_OpenFont(font_path.data, xx font_height);
+        font = TTF_OpenFont(font_path.data, 24);
         if font == null {
                 print("Can't load font at %: %\n", font_path, sdl_get_error());
         }
@@ -201,7 +205,6 @@ main :: () {
         print("Entering main loop...\n");
         is_running = true;
         event: SDL_Event;
-	text_width : s32 = 15;
         while is_running {
 		selected_column :: () -> *Acme_Element #expand {
 			return *(acme.rows[acme.selected_row].columns[acme.selected_col]);
@@ -231,6 +234,9 @@ main :: () {
 						delete_char(selected_buffer(), xx selected_buffer().cursor - 1);
 						selected_buffer().cursor -= 1;
 					}
+					case .LCTRL; #through;
+					case .RCTRL;
+					is_ctrl_held = event.key.down;
                                 }
 				case .WINDOW_PIXEL_SIZE_CHANGED;
 				recalculate_sizes(*ctx, event.window.data1, event.window.data2);
@@ -240,13 +246,21 @@ main :: () {
 				append_text(selected_buffer(), text, xx selected_buffer().cursor);
 				selected_buffer().cursor += text.count;
 				case .MOUSE_WHEEL;
-				text_width += event.wheel.integer_y;
+				if (is_ctrl_held) {
+					font_size := TTF_GetFontSize(font);
+					next_size := font_size + event.wheel.integer_y;
+					if (next_size >= 1.0) {
+						TTF_SetFontSize(font, next_size);
+					}
+				}
                         }
                 }
                 sdl_set_color(renderer, background_color);
                 SDL_RenderClear(renderer);
                 x: float = 0;
                 y: float = 0;
+		font_height:= TTF_GetFontSize(font);
+		assert(font_height > 0.0, "Can't get font size.");
                 for row, row_index: acme.rows {
                         for col, col_index: row.columns {
 				is_selected := row_index == acme.selected_row && col_index == acme.selected_col;

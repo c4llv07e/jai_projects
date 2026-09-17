@@ -31,6 +31,14 @@ SDL_Scancode :: enum u32 {
 	BACKSPACE :: 42;
 	RIGHT :: 79;
 	LEFT :: 80;
+	LCTRL :: 224;
+	LSHIFT :: 225;
+	LALT :: 226;
+	LGUI :: 227;
+	RCTRL :: 228;
+	RSHIFT :: 229;
+	RALT :: 230;
+	RGUI :: 231;
 };
 SDL_Keycode :: u32;
 SDL_Keymod :: enum u16 {
@@ -194,7 +202,8 @@ TTF_OpenFont :: (file: *u8, ptsize: float32) -> *TTF_Font #foreign sdl3_ttf;
 TTF_RenderText_Blended :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color) -> *SDL_Surface #foreign sdl3_ttf;
 TTF_RenderText_Blended_Wrapped :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color, wrap_width: s32) -> *SDL_Surface #foreign sdl3_ttf;
 TTF_MeasureString :: (font: *TTF_Font, text: *u8, length: u64, max_width: s32, measured_width: *s32, measured_length: *u64) -> bool #foreign sdl3_ttf;
-
+TTF_SetFontSize :: (font: *TTF_Font, ptsize: float32) -> bool #foreign sdl3_ttf;
+TTF_GetFontSize :: (font: *TTF_Font) -> float32 #foreign sdl3_ttf;
 
 sdl_get_error :: () -> string {
         return to_string(SDL_GetError());

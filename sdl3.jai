@@ -85,6 +85,20 @@ SDL_KeyboardEvent :: struct {
         repeat: bool;
 };
 
+SDL_MouseButtonEvent :: struct {
+	type: SDL_EventType;
+	reserved: u32;
+	timestamp: u64;
+	windowID: SDL_WindowID;
+	which: SDL_MouseID;
+	button: u8;
+	down: bool;
+	clicks: u8;
+	padding: u8;
+	x: float32;
+	y: float32;
+};
+
 SDL_MouseID :: u32;
 SDL_MouseWheelDirection :: enum u32 {
 	SDL_MOUSEWHEEL_NORMAL;
@@ -120,11 +134,20 @@ SDL_Event :: union {
 	window: SDL_WindowEvent;
         key: SDL_KeyboardEvent;
 	text: SDL_TextInputEvent;
+	mouse: SDL_MouseButtonEvent;
 	wheel: SDL_MouseWheelEvent;
 };
 
 SDL_Color :: struct {
         r, g, b, a: u8;
+};
+
+SDL_Point :: struct {
+	x, y: s32;
+};
+
+SDL_FPoint :: struct {
+	x, y: float32;
 };
 
 SDL_Rect :: struct {

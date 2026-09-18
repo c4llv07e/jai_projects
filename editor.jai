@@ -16,8 +16,8 @@ Acme_Indent :: struct {
                 width: float;
                 columns: [..]Acme_Element;
         };
-        selected_row: s32;
-        selected_col: s32;
+        selected_row: s64;
+        selected_col: s64;
 };
 
 Text_Buffer :: struct {
@@ -219,7 +219,22 @@ render :: (using ctx: *Ctx) {
 	render_fan(ctx);
 	SDL_RenderPresent(renderer);
 	should_render = false;
-	print("\n");
+}
+
+find_acme_on_point :: (using ctx: *Ctx, point: SDL_FPoint) -> (s64, s64, bool) {
+	x := 0.0;
+	for row, row_index: acme.rows {
+		defer x += row.width;
+		y := 0.0;
+		if (point.x < x) || (point.x >= x + row.width) continue;
+		for col, col_index: row.columns {
+			defer y += col.height;
+			if (point.y >= y) && (point.y <= y + col.height) {
+				return row_index, col_index, true;
+			}
+		}
+	}
+	return 0, 0, false;
 }
 
 main :: () {
@@ -315,6 +330,13 @@ main :: () {
 				append_text(selected_buffer(), text, xx selected_buffer().cursor);
 				selected_buffer().cursor += text.count;
 				should_render = true;
+				case .MOUSE_BUTTON_DOWN;
+				row, col, ok := find_acme_on_point(*ctx, .{event.mouse.x, event.mouse.y});
+				if ok {
+					acme.selected_row = row;
+					acme.selected_col = col;
+					should_render = true;
+				}
 				case .MOUSE_WHEEL;
 				if (is_ctrl_held) {
 					font_size := TTF_GetFontSize(font);

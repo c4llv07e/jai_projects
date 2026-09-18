@@ -3,6 +3,7 @@
 #import,file "sdl3.jai";
 #import,file "theme.jai";
 
+enable_render_fan :: true;
 cool :: true;
 
 Acme_Element :: struct {
@@ -33,7 +34,8 @@ Ctx :: struct {
                 height : u32;
         };
 	is_ctrl_held: bool = false;
-        is_running: bool = false;;
+        is_running: bool = false;
+	should_render: bool = true;
         acme: Acme_Indent;
 };
 
@@ -73,7 +75,6 @@ render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: str
 }
 
 render_text_wrapped :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string, wrap_width: s32 = 0, caller_loc := #caller_location) -> (s32, s32) {
-	assert(wrap_width > 0, "You probably shouldn't use wrapped text renderer with non positive wrap value", loc = caller_loc);
 	font_height := TTF_GetFontSize(font);
 	assert(font_height > 0.0, "Can't get font size.");
 	while text.count > 0 {
@@ -82,6 +83,7 @@ render_text_wrapped :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, t
 			print("Error on rendering wrapped text: %\n", sdl_get_error());
 			return 0, 0;
 		}
+		if line_text_length <= 0 then line_text_length = 1; // At least draw it partially.
 		text_w, text_h := render_text(ctx, x, y, color, substring(text, xx line_text_length));
 		if text.count == xx line_text_length {
 			return line_width, xx y;
@@ -92,21 +94,11 @@ render_text_wrapped :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, t
 	return 0, xx y;
 }
 
-rect_line :: (using ctx: *Ctx, rect: SDL_FRect, color: SDL_Color) {
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-        SDL_RenderRect(renderer, *rect);
-}
-
-fill_rect :: (using ctx: *Ctx, rect :SDL_FRect, color: SDL_Color) {
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-        SDL_RenderFillRect(renderer, *rect);
-}
-
 postprocessing :: (using ctx: *Ctx) {
         y : float = 0;
         panel_height :: 4.0;
         while xx y < height {
-                fill_rect(ctx, .{0, y, xx width, panel_height}, .{0x10, 0x10, 0x10, 0x20});
+                fill_rect(renderer, .{0, y, xx width, panel_height}, .{0x10, 0x10, 0x10, 0x20});
                 y += panel_height * 2;
         }
 }
@@ -159,6 +151,7 @@ wrap_text :: (using ctx: *Ctx, text: string, wrap_width: s32) -> (s32, s32) {
 			print("Some error on measuring text: %\n", sdl_get_error());
 			return 0, y;
 		}
+		if line_text_length <= 0 then line_text_length = 1; // To match render_text_wrapped.
 		if text.count == xx line_text_length {
 			return line_width, y;
 		}
@@ -167,6 +160,66 @@ wrap_text :: (using ctx: *Ctx, text: string, wrap_width: s32) -> (s32, s32) {
 	}
 	// unreachable.
 	return 0, y;
+}
+
+#if enable_render_fan {
+	render_fan_state : u8 = 0;
+}
+
+render_fan :: (using ctx: *Ctx) {
+#if enable_render_fan {
+		render_fan_cell_size :: 0x10;
+		fill_rect(renderer, .{0, 0, render_fan_cell_size * 2, render_fan_cell_size * 2}, .{0x40, 0x40, 0x40, 0xff});
+		fill_rect(renderer, .{
+				  xx ((render_fan_state / 2) * render_fan_cell_size),
+				  xx ((render_fan_state % 2) * render_fan_cell_size),
+				  render_fan_cell_size, render_fan_cell_size
+			  }, .{0x60, 0x60, 0x60, 0xff});
+		render_fan_state = (render_fan_state + 1) % 4;
+	}
+}
+
+render :: (using ctx: *Ctx) {
+	if !should_render return;
+	sdl_set_color(renderer, background_color);
+	SDL_RenderClear(renderer);
+	x: float = 0;
+	y: float = 0;
+	font_height:= TTF_GetFontSize(font);
+	assert(font_height > 0.0, "Can't get font size.");
+	for row, row_index: acme.rows {
+		for col, col_index: row.columns {
+			is_selected := row_index == acme.selected_row && col_index == acme.selected_col;
+			border_color : SDL_Color = ifx is_selected {
+				SDL_Color.{0x00, 0xff, 0xff, 0xff};
+			} else {
+				SDL_Color.{0xff, 0x00, 0x00, 0xff};
+			}
+			color := ifx is_selected {
+				text_color;
+			} else {
+				shadowed_text_color;
+			}
+			clip_rect := SDL_Rect.{xx SDL_floorf(x), xx SDL_floorf(y), xx SDL_ceilf(row.width), xx SDL_ceilf(col.height)};
+			SDL_SetRenderClipRect(renderer, *clip_rect);
+			rect_line(renderer, .{x, y, row.width, col.height}, border_color);
+			// print("rect = %\n", SDL_FRect.{x, y, row.width, col.height});
+			render_text_wrapped(ctx, x, y, color, col.text, xx row.width);
+			line_x, line_y := wrap_text(ctx, substring(col.text, min(col.text.count, col.cursor)), xx row.width);
+			fill_rect(renderer, .{x + line_x, y + line_y, 4, xx font_height}, .{0x99, 0x00, 0x00, 0xff});
+			y += col.height;
+		}
+		x += row.width;
+		y = 0;
+	}
+	SDL_SetRenderClipRect(renderer, null);
+#if cool {
+		postprocessing(ctx);
+	}
+	render_fan(ctx);
+	SDL_RenderPresent(renderer);
+	should_render = false;
+	print("\n");
 }
 
 main :: () {
@@ -192,7 +245,7 @@ main :: () {
                 print("Can't load font at %: %\n", font_path, sdl_get_error());
         }
         array_add(*acme.rows, .{
-                          width = xx width,
+                          width = xx (width / 3 * 2),
                   });
         array_add(*acme.rows[0].columns, .{
                           text = copy_string("Hello world"),
@@ -202,7 +255,14 @@ main :: () {
                           text = copy_string("Second panel"),
                           height = xx (height / 2),
                   });
-        print("Entering main loop...\n");
+	array_add(*acme.rows, .{
+			  width = xx (width / 3)
+		  });
+	array_add(*acme.rows[1].columns, .{
+			  text = copy_string("Third panel"),
+			  height = xx height,
+		  });
+	print("Entering main loop...\n");
         is_running = true;
         event: SDL_Event;
         while is_running {
@@ -222,70 +282,50 @@ main :: () {
 					case .I;
                                         if event.key.mod & .CTRL {
                                                 acme.selected_col = cast(s32)((acme.selected_col + 1) % acme.rows[acme.selected_row].columns.count);
+						should_render = true;
                                         }
 					case .LEFT;
-					if selected_buffer().cursor > 0
+					if selected_buffer().cursor > 0 {
 						selected_buffer().cursor -= 1;
+						should_render = true;
+					}
 					case .RIGHT;
-					if selected_buffer().cursor < selected_buffer().text.count
+					if selected_buffer().cursor < selected_buffer().text.count {
 						selected_buffer().cursor += 1;
+						should_render = true;
+					}
 					case .BACKSPACE;
 					if selected_buffer().cursor > 0 {
 						delete_char(selected_buffer(), xx selected_buffer().cursor - 1);
 						selected_buffer().cursor -= 1;
+						should_render = true;
 					}
 					case .LCTRL; #through;
 					case .RCTRL;
 					is_ctrl_held = event.key.down;
                                 }
+				case .WINDOW_EXPOSED;
+				should_render = true;
 				case .WINDOW_PIXEL_SIZE_CHANGED;
 				recalculate_sizes(*ctx, event.window.data1, event.window.data2);
+				should_render = true;
                                 case .KEY_UP;
 				case .TEXT_INPUT;
 				text := to_string(event.text.text);
 				append_text(selected_buffer(), text, xx selected_buffer().cursor);
 				selected_buffer().cursor += text.count;
+				should_render = true;
 				case .MOUSE_WHEEL;
 				if (is_ctrl_held) {
 					font_size := TTF_GetFontSize(font);
 					next_size := font_size + event.wheel.integer_y;
 					if (next_size >= 1.0) {
 						TTF_SetFontSize(font, next_size);
+						should_render = true;
 					}
 				}
                         }
                 }
-                sdl_set_color(renderer, background_color);
-                SDL_RenderClear(renderer);
-                x: float = 0;
-                y: float = 0;
-		font_height:= TTF_GetFontSize(font);
-		assert(font_height > 0.0, "Can't get font size.");
-                for row, row_index: acme.rows {
-                        for col, col_index: row.columns {
-				is_selected := row_index == acme.selected_row && col_index == acme.selected_col;
-                                border_color : SDL_Color = ifx is_selected {
-                                        SDL_Color.{0x00, 0xff, 0xff, 0xff};
-                                } else {
-                                        SDL_Color.{0xff, 0x00, 0x00, 0xff};
-                                }
-				color := ifx is_selected {
-					text_color;
-				} else {
-					shadowed_text_color;
-				}
-				rect_line(*ctx, .{x, y, row.width, col.height}, border_color);
-                                render_text_wrapped(*ctx, x, y, color, col.text, xx row.width);
-				line_x, line_y := wrap_text(*ctx, substring(col.text, min(col.text.count, col.cursor)), xx row.width);
-				fill_rect(*ctx, .{x + line_x, y + line_y, 4, xx font_height}, .{0x99, 0x00, 0x00, 0xff});
-                                y += col.height;
-                        }
-                        x += row.width;
-                        y = 0;
-                }
-#if cool {
-                        postprocessing(*ctx);
-                }
-		SDL_RenderPresent(renderer);
+		render(*ctx);
         }
 }

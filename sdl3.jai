@@ -127,6 +127,10 @@ SDL_Color :: struct {
         r, g, b, a: u8;
 };
 
+SDL_Rect :: struct {
+	x, y, w, h: s32;
+};
+
 SDL_FRect :: struct {
         x, y, w, h: float32;
 };
@@ -180,6 +184,7 @@ SDL_CreateWindow :: (title: *u8, w: int, h: int, flags: SDL_WindowFlags) -> *SDL
 SDL_CreateWindowAndRenderer :: (title: *u8, width: int, height: int, window_flags: SDL_WindowFlags, window: **void, renderer: **void) -> bool #foreign sdl3;
 SDL_PollEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
 SDL_StartTextInput :: (window: *SDL_Window) -> bool #foreign sdl3;
+SDL_SetRenderClipRect :: (renderer: *void, rect: *SDL_Rect) -> bool #foreign sdl3;
 SDL_SetRenderDrawColor :: (renderer: *void, r: u8, g: u8, b: u8, a: u8) -> bool #foreign sdl3;
 SDL_RenderClear :: (renderer: *void) -> bool #foreign sdl3;
 SDL_RenderPresent :: (renderer: *void) -> bool #foreign sdl3;
@@ -194,6 +199,8 @@ SDL_GetError :: () -> *u8 #foreign sdl3;
 
 SDL_floorf :: (x: float32) -> float32 #foreign sdl3;
 SDL_floor :: (x: float64) -> float64 #foreign sdl3;
+SDL_ceilf :: (x: float32) -> float32 #foreign sdl3;
+SDL_ceil :: (x: float64) -> float64 #foreign sdl3;
 
 TTF_Font :: void;
 
@@ -211,4 +218,14 @@ sdl_get_error :: () -> string {
 
 sdl_set_color :: (renderer: *SDL_Renderer, color: SDL_Color) {
         SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+}
+
+fill_rect :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+        SDL_RenderFillRect(renderer, *rect);
+}
+
+rect_line :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+        SDL_RenderRect(renderer, *rect);
 }

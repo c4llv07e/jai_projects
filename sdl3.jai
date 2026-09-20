@@ -11,6 +11,10 @@ SDL_EventType :: enum u32 {
 	WINDOW_MOVED;
 	WINDOW_RESIZED;
 	WINDOW_PIXEL_SIZE_CHANGED;
+	WINDOW_METAL_VIEW_RESIZED,
+	WINDOW_MINIMIZED,
+	WINDOW_MAXIMIZED,
+	WINDOW_RESTORED,
 	
 	KEY_DOWN :: 0x300;
         KEY_UP;
@@ -85,13 +89,22 @@ SDL_KeyboardEvent :: struct {
         repeat: bool;
 };
 
+SDL_MouseButtonCode :: enum u8 {
+	LEFT :: 1;
+	MIDDLE :: 2;
+	RIGHT :: 3;
+	X1 :: 4;
+	X2 :: 5;
+}
+
+
 SDL_MouseButtonEvent :: struct {
 	type: SDL_EventType;
 	reserved: u32;
 	timestamp: u64;
 	windowID: SDL_WindowID;
 	which: SDL_MouseID;
-	button: u8;
+	button: SDL_MouseButtonCode;
 	down: bool;
 	clicks: u8;
 	padding: u8;
@@ -202,10 +215,18 @@ SDL_INIT_FLAGS :: enum u32 {
         VIDEO :: 0x00000020;
 };
 
+SDL_MAJOR_VERSION :: 3;
+SDL_MINOR_VERSION :: 5;
+SDL_MICRO_VERSION :: 0;
+
 SDL_Init :: (subsystems: SDL_INIT_FLAGS) -> bool #foreign sdl3;
 SDL_CreateWindow :: (title: *u8, w: int, h: int, flags: SDL_WindowFlags) -> *SDL_Window #foreign sdl3;
 SDL_CreateWindowAndRenderer :: (title: *u8, width: int, height: int, window_flags: SDL_WindowFlags, window: **void, renderer: **void) -> bool #foreign sdl3;
+SDL_GetWindowSize :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;
+SDL_GetWindowSizeInPixels :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;
 SDL_PollEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
+SDL_WaitEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
+SDL_WaitEventTimeout :: (event: *SDL_Event, timeoutMS: s32) -> bool #foreign sdl3;
 SDL_StartTextInput :: (window: *SDL_Window) -> bool #foreign sdl3;
 SDL_SetRenderClipRect :: (renderer: *void, rect: *SDL_Rect) -> bool #foreign sdl3;
 SDL_SetRenderDrawColor :: (renderer: *void, r: u8, g: u8, b: u8, a: u8) -> bool #foreign sdl3;
@@ -219,6 +240,18 @@ SDL_DestroySurface :: (surface: *SDL_Surface) #foreign sdl3;
 SDL_RenderTexture :: (renderer: *SDL_Renderer, texture: *SDL_Texture, srcrect: *SDL_FRect, dstrect: *SDL_FRect) -> bool #foreign sdl3;
 SDL_DestroyTexture :: (texture: *SDL_Texture) #foreign sdl3;
 SDL_GetError :: () -> *u8 #foreign sdl3;
+SDL_Delay :: (ms: u32) #foreign sdl3;
+SDL_GetVersion :: () -> s32 #foreign sdl3;
+SDL_GetRevision :: () -> *u8 #foreign sdl3;
+SDL_Log :: (fmt: *u8, args: ..Any) #foreign sdl3;
+SDL_LogCritical :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
+SDL_LogDebug :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
+SDL_LogError :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
+SDL_LogInfo :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
+SDL_LogTrace :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
+SDL_LogVerbose :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
+SDL_LogWarn :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
+
 
 SDL_floorf :: (x: float32) -> float32 #foreign sdl3;
 SDL_floor :: (x: float64) -> float64 #foreign sdl3;
@@ -251,4 +284,19 @@ fill_rect :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
 rect_line :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
         SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
         SDL_RenderRect(renderer, *rect);
+}
+
+sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, s32, u64) {
+	measured_width: s32;
+	measured_length: u64;
+	res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);
+	return res, measured_width, measured_length;
+}
+
+sdl_debug_version_info :: () {
+	ver_int := SDL_GetVersion();
+	revision := SDL_GetRevision();
+	SDL_Log("Compiled with SDL version %d.%d.%d\nLinked with SDL version %d.%d.%d-%s\n",
+		SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
+		ver_int / 1000000, (ver_int / 1000) % 1000, ver_int % 1000, revision);
 }

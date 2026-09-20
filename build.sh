@@ -1,2 +1,2 @@
 #!/bin/sh
-jai editor.jai
+jai file_browser.jai

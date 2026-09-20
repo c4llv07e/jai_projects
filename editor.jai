@@ -2,6 +2,7 @@
 #import "String";
 #import,file "sdl3.jai";
 #import,file "theme.jai";
+#import,file "keybinds.jai";
 
 enable_render_fan :: true;
 cool :: true;
@@ -132,13 +133,6 @@ recalculate_sizes :: (using ctx: *Ctx, new_width: s32, new_height: s32) {
 	}
 	width = xx new_width;
 	height = xx new_height;
-}
-
-sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, s32, u64) {
-	measured_width: s32;
-	measured_length: u64;
-	res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);
-	return res, measured_width, measured_length;
 }
 
 wrap_text :: (using ctx: *Ctx, text: string, wrap_width: s32) -> (s32, s32) {
@@ -325,6 +319,11 @@ main :: () {
 				recalculate_sizes(*ctx, event.window.data1, event.window.data2);
 				should_render = true;
                                 case .KEY_UP;
+				if event.key.scancode == {
+					case .LCTRL; #through;
+					case .RCTRL;
+					is_ctrl_held = event.key.down;
+				}
 				case .TEXT_INPUT;
 				text := to_string(event.text.text);
 				append_text(selected_buffer(), text, xx selected_buffer().cursor);

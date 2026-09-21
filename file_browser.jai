@@ -1,4 +1,5 @@
 #import,file "sdl3.jai";
+#import,file "theme.jai";
 using Basic :: #import "Basic" () (MEMORY_DEBUGGER = false);
 #import "File";
 #import "File_Utilities";
@@ -8,6 +9,7 @@ DEBUG :: true;
 SCROLL_MOD :: 32.0;
 font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
 padding :: 1.1;
+pathbar_height :: 24.0;
 
 Dir_Entry :: struct {
 	name: string;
@@ -21,7 +23,7 @@ Dir_Entry :: struct {
 Panel :: struct {
 	rect: SDL_FRect;
 	path: Path;
-	icon_size: s32 = 48;
+	icon_size: s32 = 32;
 	dirents: [..]Dir_Entry;
 	scroll: float32 = 0.0;
 };
@@ -60,7 +62,7 @@ substring :: (s: string, n: s64) -> string {
 
 check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc := #caller_location) #expand {
 	if (!status) {
-		print("%: %: %\n", caller_loc, msg, sdl_get_error());
+		log("%: %: %\n", caller_loc, msg, sdl_get_error(), flags=.ERROR);
 		exit(-1);
 	}
 }
@@ -86,15 +88,16 @@ render :: (using ctx: *Ctx) {
 }
 
 render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string) -> (s32, s32) {
+	if text.count <= 0 return 0, 0;
         surface: *SDL_Surface = TTF_RenderText_Blended(font, text.data, xx text.count, color);
 	if surface == null {
-		print("Can't render text on surface: %\n", sdl_get_error());
+		log("Can't render text on surface: %\n", sdl_get_error(), flags=.WARNING);
 		return 0, 0;
 	}
 	defer SDL_DestroySurface(surface);
 	texture: *SDL_Texture = SDL_CreateTextureFromSurface(renderer, surface);
 	if texture == null {
-		print("Can't convert surface to texture: %\n", sdl_get_error());
+		log("Can't convert surface to texture: %\n", sdl_get_error(), flags=.WARNING);
 		return 0, 0;
 	}
 	defer SDL_DestroyTexture(texture);
@@ -105,7 +108,7 @@ render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: str
 		h = xx texture.h,
 	};
 	if !SDL_RenderTexture(renderer, texture, null, *text_bounds) {
-		print("Can't blit texture: %\n", sdl_get_error());
+		log("Can't blit texture: %\n", sdl_get_error(), flags=.WARNING);
 		return 0, 0;
 	}
 	return texture.w, texture.h;
@@ -117,7 +120,7 @@ render_text_wrapped :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, t
 	while text.count > 0 {
 		ok, line_width, line_text_length := sdl_measure_string(font, text, wrap_width);
 		if !ok {
-			print("Error on rendering wrapped text: %\n", sdl_get_error());
+			log("Error on rendering wrapped text: %\n", sdl_get_error(), flags=.WARNING);
 			return 0, 0;
 		}
 		if line_text_length <= 0 then line_text_length = 1; // At least draw it partially.
@@ -136,24 +139,64 @@ get_panel_entry_position :: (using ctx: *Ctx, using panel: *Panel, entry_index: 
 	SDL_GetWindowSizeInPixels(window, *width, *height);
 	return .{
 		xx (rect.x + icon_size / 5),
-		xx ((icon_size * padding / 10.0) + rect.y + (entry_index * (icon_size * padding))) + panel.scroll,
+		xx ((icon_size * padding / 10.0) + rect.y + (entry_index * (icon_size * padding))) + panel.scroll + pathbar_height,
 		xx (width - (icon_size / 2.5)),
 		xx icon_size
 	};
 }
 
+get_panel_pathbar_rect :: (using ctx: *Ctx, using panel: *Panel) -> SDL_FRect {
+	font_size := TTF_GetFontSize(font);
+	return .{
+		xx panel.rect.x, xx panel.rect.y,
+		xx panel.rect.w, font_size,
+	};
+}
+
+get_pathbar_text_rect :: (using ctx: *Ctx, using panel: *Panel) -> SDL_FRect {
+	pathbar_rect := get_panel_pathbar_rect(ctx, panel);
+	return pathbar_rect + .{24, 0, -24, 0};
+}
+
+get_pathbar_up_button_rect :: (using ctx: *Ctx, using panel: *Panel) -> SDL_FRect {
+	pathbar_rect := get_panel_pathbar_rect(ctx, panel);
+	font_size := TTF_GetFontSize(font);
+	return .{pathbar_rect.x, pathbar_rect.y, font_size, font_size};
+}
+
+get_dirents_rect :: (using ctx: *Ctx, using panel: *Panel) -> SDL_FRect {
+	pathbar_rect := get_panel_pathbar_rect(ctx, panel);
+	return SDL_FRect.{
+		x = panel.rect.x,
+		y = panel.rect.y + pathbar_rect.h,
+		w = panel.rect.w,
+		h = panel.rect.h
+	};
+}
+
 panel_render :: (using ctx: *Ctx, using panel: *Panel) {
-	rect_line(renderer, panel.rect, .{0xff, 0x00, 0x00, 0xff});
+	draw_rect_lines(renderer, panel.rect, .{0xff, 0x00, 0x00, 0xff});
 	x := icon_size * padding - icon_size;
 	y := icon_size * padding - icon_size;
 	font_size := TTF_GetFontSize(font);
+	pathbar_rect := get_panel_pathbar_rect(ctx, panel);
+	pathbar_text_rect := get_pathbar_text_rect(ctx, panel);
+	pathbar_up_icon_rect := get_pathbar_up_button_rect(ctx, panel);
+	path_str := path_to_string(path,, allocator=temp);
+	SDL_SetRenderClipRectFloat(renderer, *pathbar_rect);
+	fill_rect(renderer, pathbar_rect, pathbar_background_color);
+	render_text(ctx, pathbar_text_rect.x, pathbar_text_rect.y, pathbar_color, path_str);
+	draw_rect_lines(renderer, pathbar_up_icon_rect + .{2, 2, -4, -4}, .{0xff, 0x00, 0x00, 0xff});
+	free(path_str,, allocator=temp);
+	dirents_rect := get_dirents_rect(ctx, panel);
+	SDL_SetRenderClipRectFloat(renderer, *dirents_rect);
 	for dirent, dirent_index: dirents {
 		name_color :: SDL_Color.{0xe3, 0xe3, 0xe3, 0xff};
 		color : SDL_Color = ifx dirent.filetype == .FILE
 			then SDL_Color.{0xff, 0x00, 0x00, 0xff}
 		else SDL_Color.{0x00, 0x00, 0xff, 0xff};
 		render_rect := get_panel_entry_position(ctx, panel, dirent_index);
-		rect_line(renderer, render_rect, color);
+		draw_rect_lines(renderer, render_rect, color);
 		surface := TTF_RenderText_Blended(font, dirent.name.data, xx dirent.name.count, name_color);
 		assert(surface != null, "Can't blend file name!");
 		defer SDL_DestroySurface(surface);
@@ -172,6 +215,7 @@ panel_render :: (using ctx: *Ctx, using panel: *Panel) {
 			y += icon_size * padding;
 		}
 	}
+	SDL_SetRenderClipRectFloat(renderer, null);
 }
 
 Ctx_with_panel :: struct {
@@ -187,42 +231,21 @@ update_panel_file :: (info: *File_Visit_Info, using user_data: *Ctx_with_panel) 
 
 panel_update :: (using ctx: *Ctx, using panel: *Panel) {
 	user_info := Ctx_with_panel.{ctx, panel};
+	new_path := copy_to_permanent(reduce_path(path));
+	free_permanent(path);
+	path = new_path;
 	for panel.dirents {
 		free(it.name);
 	}
 	panel.scroll = 0;
 	panel.dirents.count = 0;
 	path_str: string;
-	if path.words.count == 0
-		path_str = ".";
-	else {
-		path_str = path_to_string(path,, allocator=temp);
-	}
+	path_str = path_to_string(path,, allocator=temp);
 	ok := visit_files(path_str, false, *user_info, update_panel_file, visit_files = true, visit_directories = true);
 	if !ok {
-		print("Can't list files in dir \"%\"\n", path_str);
+		log("Can't list files in dir \"%\"\n", path_str, flags=.WARNING);
 	}
 	should_render = true;
-}
-
-select_dirent_on_point :: (using ctx: *Ctx, panel: *Panel, point: SDL_FPoint) {
-	using,only(icon_size,dirents,rect) panel;
-	for dirent, dirent_index: dirents {
-		render_rect := get_panel_entry_position(ctx, panel, dirent_index);
-		if point.x >= render_rect.x && point.x <= render_rect.x + render_rect.w && point.y >= render_rect.y && point.y <= render_rect.y + render_rect.h {
-			if #complete dirent.filetype == {
-				case .FILE;
-				print("todo: open file %\n", dirent.name);
-				case .DIRECTORY;
-				array_add(*panel.path.words, copy_string(dirent.name));
-				panel_update(ctx, panel);
-				should_render = true;
-				case;
-				print("Unknown filetype clicked: %\n", dirent.filetype);
-			}
-			break;
-		}
-	}
 }
 
 is_at_cwd_path :: (path: Path) -> bool {
@@ -230,10 +253,48 @@ is_at_cwd_path :: (path: Path) -> bool {
 }
 
 go_up_dir :: (using ctx: *Ctx, using panel: *Panel) {
-	array_add(*path.words, "..");
-	reduce_path(path);
-	panel_update(ctx, panel);
-	should_render = true;
+#if DEBUG {
+		assert(is_absolute_path(path_to_string(path,, allocator=temp)), "Somehow we get relative path in panel path. It should not happen.");
+	}
+	if path.words.count > 0 {
+		free(path.words[path.words.count - 1]);
+		path.words.count -= 1;
+		panel_update(ctx, panel);
+		should_render = true;
+	}
+}
+
+try_select_dirent_on_point :: (using ctx: *Ctx, panel: *Panel, point: SDL_FPoint) -> bool {
+	using,only(icon_size,dirents,rect) panel;
+	dirents_rect := get_dirents_rect(ctx, panel);
+	for dirent, dirent_index: dirents {
+		dirent_rect := get_panel_entry_position(ctx, panel, dirent_index);
+		visible_rect: SDL_FRect;
+		is_visible := SDL_GetRectIntersectionFloat(*dirents_rect, *dirent_rect, *visible_rect);
+		if !is_visible continue;
+		if point.x >= visible_rect.x && point.x <= visible_rect.x + visible_rect.w && point.y >= visible_rect.y && point.y <= visible_rect.y + visible_rect.h {
+			if #complete dirent.filetype == {
+				case .FILE;
+				log("todo: open file %\n", dirent.name);
+				case .DIRECTORY;
+				array_add(*panel.path.words, copy_string(dirent.name));
+				panel_update(ctx, panel);
+				should_render = true;
+				case;
+				log("Unknown filetype clicked: %\n", dirent.filetype, flags=.WARNING);
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+check_buttons_hit :: (using ctx: *Ctx, using panel: *Panel, point: SDL_FPoint) -> bool {
+	up_button_rect := get_pathbar_up_button_rect(ctx, panel);
+	if is_intersecting(up_button_rect, point) {
+		go_up_dir(ctx, panel);
+	}
+	return false;
 }
 
 main :: () {
@@ -244,7 +305,7 @@ main :: () {
 #if DEBUG {
 		debug_text.allocator = temp;
 	}
-	path := parse_path(copy_string("."), reduce=false);
+	path := copy_to_permanent(parse_path(get_absolute_path(".")));
 	array_add(*ctx.panels, .{rect=.{x=0, y=0, w=init_width, h=init_height}, path=path});
 	sdl_debug_version_info();
 	check_sdl(SDL_Init(.VIDEO), "Can't init SDL");
@@ -252,7 +313,7 @@ main :: () {
 	check_sdl(TTF_Init());
 	font = TTF_OpenFont(font_path, 24);
 	if !font {
-		print("Can't load font: %\n", sdl_get_error());
+		log("Can't load font: %\n", sdl_get_error(), flags=.ERROR);
 		exit(-1);
 	}
 	panel_update(*ctx, *ctx.panels[0]);
@@ -276,7 +337,8 @@ main :: () {
 				case .MOUSE_BUTTON_DOWN;
 				if event.mouse.button == {
 					case .LEFT;
-					select_dirent_on_point(*ctx, *ctx.panels[0], .{event.mouse.x, event.mouse.y});
+					if try_select_dirent_on_point(*ctx, *ctx.panels[0], .{event.mouse.x, event.mouse.y}) continue;
+					if check_buttons_hit(*ctx, *ctx.panels[0], .{event.mouse.x, event.mouse.y}) continue;
 					case .X1;
 					go_up_dir(*ctx, *ctx.panels[0]);
 				}
@@ -313,9 +375,8 @@ main :: () {
 		array_free(ctx.panels);
 		report := make_leak_report();
 		for report.sorted_summaries {
-			print("** Summary %: **\n%\n", it_index, <<it);
+			log("** Summary %: **\n%\n", it_index, <<it);
 		}
-		print("Found leaks:\n");
 		log_leak_report(report);
 	}
 }

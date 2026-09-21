@@ -1,6 +1,6 @@
+#module_parameters(ENABLE_JAI_FEATURES := true) (ENABLE_TTF := true);
 
 sdl3 :: #system_library "libSDL3.so";
-sdl3_ttf :: #system_library "libSDL3_ttf.so";
 
 SDL_EventType :: enum u32 {
         QUIT :: 0x100;
@@ -229,6 +229,16 @@ SDL_WaitEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
 SDL_WaitEventTimeout :: (event: *SDL_Event, timeoutMS: s32) -> bool #foreign sdl3;
 SDL_StartTextInput :: (window: *SDL_Window) -> bool #foreign sdl3;
 SDL_SetRenderClipRect :: (renderer: *void, rect: *SDL_Rect) -> bool #foreign sdl3;
+#if OS != .WINDOWS {
+	SDL_SetRenderClipRectFloat :: (renderer: *void, rect: *SDL_FRect) -> bool #foreign sdl3;
+} else {
+	SDL_SetRenderClipRectFloat :: (renderer: *void, rect: *SDL_FRect) -> bool {
+		nrect := SDL_Rect.{
+			xx rect.x, xx rect.y, xx rect.w, xx rect.h,
+		};
+		return SDL_SetRenderClipRect(renderer, *nrect);
+	}
+}
 SDL_SetRenderDrawColor :: (renderer: *void, r: u8, g: u8, b: u8, a: u8) -> bool #foreign sdl3;
 SDL_RenderClear :: (renderer: *void) -> bool #foreign sdl3;
 SDL_RenderPresent :: (renderer: *void) -> bool #foreign sdl3;
@@ -243,6 +253,7 @@ SDL_GetError :: () -> *u8 #foreign sdl3;
 SDL_Delay :: (ms: u32) #foreign sdl3;
 SDL_GetVersion :: () -> s32 #foreign sdl3;
 SDL_GetRevision :: () -> *u8 #foreign sdl3;
+SDL_GetRectIntersectionFloat :: (A: *SDL_FRect, B: *SDL_FRect, result: *SDL_FRect) -> bool #foreign sdl3;
 SDL_Log :: (fmt: *u8, args: ..Any) #foreign sdl3;
 SDL_LogCritical :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
 SDL_LogDebug :: (category: s32, fmt: *u8, args: ..Any) #foreign sdl3;
@@ -258,45 +269,61 @@ SDL_floor :: (x: float64) -> float64 #foreign sdl3;
 SDL_ceilf :: (x: float32) -> float32 #foreign sdl3;
 SDL_ceil :: (x: float64) -> float64 #foreign sdl3;
 
-TTF_Font :: void;
-
-TTF_Init :: () -> bool #foreign sdl3_ttf;
-TTF_OpenFont :: (file: *u8, ptsize: float32) -> *TTF_Font #foreign sdl3_ttf;
-TTF_RenderText_Blended :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color) -> *SDL_Surface #foreign sdl3_ttf;
-TTF_RenderText_Blended_Wrapped :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color, wrap_width: s32) -> *SDL_Surface #foreign sdl3_ttf;
-TTF_MeasureString :: (font: *TTF_Font, text: *u8, length: u64, max_width: s32, measured_width: *s32, measured_length: *u64) -> bool #foreign sdl3_ttf;
-TTF_SetFontSize :: (font: *TTF_Font, ptsize: float32) -> bool #foreign sdl3_ttf;
-TTF_GetFontSize :: (font: *TTF_Font) -> float32 #foreign sdl3_ttf;
-
-sdl_get_error :: () -> string {
-        return to_string(SDL_GetError());
+#if ENABLE_TTF {
+	sdl3_ttf :: #system_library "libSDL3_ttf.so";
+	
+	TTF_Font :: void;
+	
+	TTF_Init :: () -> bool #foreign sdl3_ttf;
+	TTF_OpenFont :: (file: *u8, ptsize: float32) -> *TTF_Font #foreign sdl3_ttf;
+	TTF_RenderText_Blended :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color) -> *SDL_Surface #foreign sdl3_ttf;
+	TTF_RenderText_Blended_Wrapped :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color, wrap_width: s32) -> *SDL_Surface #foreign sdl3_ttf;
+	TTF_MeasureString :: (font: *TTF_Font, text: *u8, length: u64, max_width: s32, measured_width: *s32, measured_length: *u64) -> bool #foreign sdl3_ttf;
+	TTF_SetFontSize :: (font: *TTF_Font, ptsize: float32) -> bool #foreign sdl3_ttf;
+	TTF_GetFontSize :: (font: *TTF_Font) -> float32 #foreign sdl3_ttf;
 }
 
-sdl_set_color :: (renderer: *SDL_Renderer, color: SDL_Color) {
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-}
-
-fill_rect :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-        SDL_RenderFillRect(renderer, *rect);
-}
-
-rect_line :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-        SDL_RenderRect(renderer, *rect);
-}
-
-sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, s32, u64) {
-	measured_width: s32;
-	measured_length: u64;
-	res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);
-	return res, measured_width, measured_length;
-}
-
-sdl_debug_version_info :: () {
-	ver_int := SDL_GetVersion();
-	revision := SDL_GetRevision();
-	SDL_Log("Compiled with SDL version %d.%d.%d\nLinked with SDL version %d.%d.%d-%s\n",
-		SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
-		ver_int / 1000000, (ver_int / 1000) % 1000, ver_int % 1000, revision);
+#if ENABLE_JAI_FEATURES {
+	sdl_get_error :: () -> string {
+		return to_string(SDL_GetError());
+	}
+	
+	sdl_set_color :: (renderer: *SDL_Renderer, color: SDL_Color) {
+		SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+	}
+	
+	fill_rect :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
+		SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+		SDL_RenderFillRect(renderer, *rect);
+	}
+	
+	draw_rect_lines :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {
+		SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+		SDL_RenderRect(renderer, *rect);
+	}
+	
+	is_intersecting :: (rect: SDL_FRect, point: SDL_FPoint) -> bool {
+		return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
+	}
+	
+	sdl_debug_version_info :: () {
+		ver_int := SDL_GetVersion();
+		revision := SDL_GetRevision();
+		SDL_Log("Compiled with SDL version %d.%d.%d\nLinked with SDL version %d.%d.%d-%s\n",
+			SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
+			ver_int / 1000000, (ver_int / 1000) % 1000, ver_int % 1000, revision);
+	}
+	
+	operator + :: (a: SDL_FRect, b: SDL_FRect) -> SDL_FRect {
+		return .{a.x + b.x, a.y + b.y, a.w + b.w, a.h + b.h};
+	}
+	
+#if ENABLE_TTF {
+		sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, s32, u64) {
+			measured_width: s32;
+			measured_length: u64;
+			res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);
+			return res, measured_width, measured_length;
+		}
+	}
 }

@@ -211,7 +211,7 @@ SDL_BlendMode :: enum u32 {
 SDL_Renderer :: void;
 SDL_Window :: void;
 
-SDL_INIT_FLAGS :: enum u32 {
+SDL_InitFlags :: enum u32 {
         VIDEO :: 0x00000020;
 };
 
@@ -219,7 +219,8 @@ SDL_MAJOR_VERSION :: 3;
 SDL_MINOR_VERSION :: 5;
 SDL_MICRO_VERSION :: 0;
 
-SDL_Init :: (subsystems: SDL_INIT_FLAGS) -> bool #foreign sdl3;
+SDL_Init :: (subsystems: SDL_InitFlags) -> bool #foreign sdl3;
+SDL_WasInit :: (flags: SDL_InitFlags) -> SDL_InitFlags #foreign sdl3;
 SDL_CreateWindow :: (title: *u8, w: int, h: int, flags: SDL_WindowFlags) -> *SDL_Window #foreign sdl3;
 SDL_CreateWindowAndRenderer :: (title: *u8, width: int, height: int, window_flags: SDL_WindowFlags, window: **void, renderer: **void) -> bool #foreign sdl3;
 SDL_GetWindowSize :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;

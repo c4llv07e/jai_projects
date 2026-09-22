@@ -1,2 +1,2 @@
 #!/bin/sh
-jai file_browser.jai
+jai first.jai

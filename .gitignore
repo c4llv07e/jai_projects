@@ -1,4 +1,6 @@
 /editor
 /keybinds
 /file_browser
+/linker
 /.build/
+*.o

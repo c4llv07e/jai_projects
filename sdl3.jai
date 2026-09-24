@@ -32,6 +32,8 @@ SDL_WindowID :: u32;
 
 SDL_Scancode :: enum u32 {
         I :: 12;
+	L :: 15;
+	S :: 22;
 	BACKSPACE :: 42;
 	RIGHT :: 79;
 	LEFT :: 80;
@@ -290,6 +292,8 @@ SDL_sqrtf :: (x: float32) -> float32 #foreign sdl3;
 SDL_sqrt :: (x: float64) -> float64 #foreign sdl3;
 SDL_fabsf :: (x: float32) -> float32 #foreign sdl3;
 SDL_fabs :: (x: float64) -> float64 #foreign sdl3;
+SDL_expf :: (x: float32) -> float32 #foreign sdl3;
+SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 
 #if ENABLE_TTF {
 	sdl3_ttf :: #system_library "libSDL3_ttf.so";
@@ -336,6 +340,13 @@ SDL_fabs :: (x: float64) -> float64 #foreign sdl3;
 			ver_int / 1000000, (ver_int / 1000) % 1000, ver_int % 1000, revision);
 	}
 	
+	SDL_expf :: (p: SDL_FPoint) -> SDL_FPoint {
+		return .{
+			SDL_expf(p.x),
+			SDL_expf(p.y),
+		};
+	}
+	
 	operator + :: (a: SDL_FRect, b: SDL_FRect) -> SDL_FRect {
 		return .{a.x + b.x, a.y + b.y, a.w + b.w, a.h + b.h};
 	}
@@ -354,6 +365,10 @@ SDL_fabs :: (x: float64) -> float64 #foreign sdl3;
 	
 	operator * :: (a: SDL_FPoint, x: float32) -> SDL_FPoint {
 		return .{a.x * x, a.y * x};
+	}
+	
+	operator * :: (a: SDL_FPoint, b: SDL_FPoint) -> SDL_FPoint {
+		return .{a.x * b.x, a.y * b.y};
 	}
 	
 #if ENABLE_TTF {

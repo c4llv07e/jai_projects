@@ -12,7 +12,10 @@ Scene :: struct {
 
 Player :: struct {
 	using pos: SDL_FPoint;
-	speed: float32 = 100;
+	velocity: SDL_FPoint;
+	max_speed: float32 = 400.0;
+	accel_rate: float32 = 15.0;
+	decel_rate: float32 = 25.0;
 	size: float32 = 32;
 }
 
@@ -156,22 +159,81 @@ render_scene :: (using ctx: *Ctx) {
 	}
 }
 
-load_scene :: (using ctx: *Ctx) {
-	if ctx.scene.brushes.data != null {
-		array_free(ctx.scene.brushes);
+save_scene :: (using ctx: *Ctx, filepath: string) {
+	sb: String_Builder;
+	print(*sb, "brushes\n");
+	for scene.brushes {
+		print(*sb, "% % % % - % % % %\n", it.rect.x, it.rect.y, it.rect.w, it.rect.h,
+		      it.color.r, it.color.g, it.color.b, it.color.a);
 	}
-	array_add(*ctx.scene.brushes, .{
-			  rect = .{0, 0, 200, 20},
-			  color = .{0x40, 0x60, 0x40, 0xff},
-		  });
-	array_add(*ctx.scene.brushes, .{
-			  rect = .{200, 0, 200, 20},
-			  color = .{0x40, 0x60, 0x40, 0xff},
-		  });
-	array_add(*ctx.scene.brushes, .{
-			  rect = .{200, 0, 20, 200},
-			  color = .{0x40, 0x60, 0x40, 0xff},
-		  });
+	write_entire_file(filepath, *sb);
+}
+
+consume_word :: (sentence: *string) -> word: string {
+	word, rhs := break_by_spaces(sentence.*);
+	sentence.* = rhs;
+	return word;
+}
+
+consume_float :: (data: *string) -> result: float32 {
+	str := consume_word(data);
+	res := string_to_float(str);
+	return res;
+}
+
+consume_int :: (data: *string) -> result: int {
+	str := consume_word(data);
+	res := string_to_int(str);
+	return res;
+}
+
+load_scene :: (using ctx: *Ctx, filepath: string) -> bool {
+	if ctx.scene.brushes.data != null {
+		array_reset(*ctx.scene.brushes);
+	}
+	data, ok := read_entire_file(filepath,, temp);
+	if !ok {
+		log("Can't open scene file %", filepath);
+		return false;
+	}
+	state: enum u32 {
+		INIT :: 0;
+		READING_BRUSHES;
+	} = .INIT;
+	while true {
+		line, has_line := consume_next_line(*data);
+		if !has_line break;
+		line = eat_spaces(line);
+		if line.count == 0 continue;
+		if begins_with(line, "brushes") {
+			state = .READING_BRUSHES;
+			continue;
+		}
+		if state == {
+			case .READING_BRUSHES;
+			x := consume_float(*line);
+			y := consume_float(*line);
+			w := consume_float(*line);
+			h := consume_float(*line);
+			separator := consume_word(*line);
+			if separator != "-" {
+				log("Expected separator, got %", separator);
+				return false;
+			}
+			r := consume_int(*line);
+			g := consume_int(*line);
+			b := consume_int(*line);
+			a := consume_int(*line);
+			if r > 255 || g > 255 || b > 255 || a > 255 {
+				log("Color {%, %, %, %} is too hdr for us", r, g, b, a);
+			}
+			array_add(*scene.brushes, Brush.{rect=.{x, y, w, h}, color=.{xx r, xx g, xx b, xx a}});
+			case;
+			log("Can't decide what state we are in");
+			return false;
+		}
+	}
+	return true;
 }
 
 sdl_render_line :: (renderer: *SDL_Renderer, from: SDL_FPoint, to: SDL_FPoint) {
@@ -235,8 +297,7 @@ main :: () {
 	}
 	buttons.data = SDL_GetKeyboardState(xx *buttons.count);
 	event: SDL_Event;
-	load_scene(*ctx);
-	player.speed = 400;
+	load_scene(*ctx, "main.scene");
 	previous_frame_time = SDL_GetTicks();
 	player_move: SDL_FPoint;
 	player.x = -60;
@@ -248,18 +309,40 @@ main :: () {
 			if event.type == {
 				case .QUIT;
 				break main_loop;
+				case .KEY_DOWN;
+				if event.key.scancode == {
+					case .S;
+					save_scene(*ctx, "main.scene");
+					case .L;
+					load_scene(*ctx, "main.scene");
+				}
 				case .MOUSE_MOTION;
 				mouse_x = event.motion.x;
 				mouse_y = event.motion.y;
 			}
 		}
-		player_move.x = player.speed * (cast(s8)buttons[SDL_Scancode.RIGHT] - cast(s8)buttons[SDL_Scancode.LEFT]) * deltatime;
-		player_move.y = player.speed * (cast(s8)buttons[SDL_Scancode.DOWN] - cast(s8)buttons[SDL_Scancode.UP]) * deltatime;
-		if player_move.x != 0 || player_move.y != 0 {
+		desired_move := SDL_FPoint.{
+			x = cast(float32)(cast(s8)buttons[SDL_Scancode.RIGHT] - cast(s8)buttons[SDL_Scancode.LEFT]),
+			y = cast(float32)(cast(s8)buttons[SDL_Scancode.DOWN] - cast(s8)buttons[SDL_Scancode.UP]),
+		};
+		desired_length := vec_length(desired_move);
+		if desired_length > 0.0 {
+			desired_move /= desired_length;
+		}
+		desired_move *= player.max_speed;
+		rate := SDL_FPoint.{
+			x = ifx desired_move.x != 0.0 then player.accel_rate else player.decel_rate,
+			y = ifx desired_move.y != 0.0 then player.accel_rate else player.decel_rate,
+		};
+		player.velocity += (desired_move - player.velocity) * (.{1.0, 1.0} - SDL_expf(rate * -deltatime));
+		if SDL_fabsf(player.velocity.x) < 0.1 player.velocity.x = 0.0;
+		if SDL_fabsf(player.velocity.y) < 0.1 player.velocity.y = 0.0;
+		frame_velocity := player.velocity * deltatime;
+		if frame_velocity.x != 0 || frame_velocity.y != 0 {
 			for 0..2 {
-				move_len := vec_length(player_move);
-				if move_len < 0.0e-3 break;
-				norm_move := player_move / move_len;
+				move_len := vec_length(player.velocity);
+				if move_len < 1.0e-4 break;
+				norm_move := frame_velocity / move_len;
 				closest_t := move_len;
 				closest_normal: SDL_FPoint;
 				hit_anything := false;
@@ -277,14 +360,14 @@ main :: () {
 					player.pos += norm_move * t_to_move;
 					remaining_length := move_len - closest_t;
 					remaining_move := norm_move * remaining_length;
-					dot := dot_product(remaining_move, closest_normal);
-					if dot < 0.0 {
-						player_move = remaining_move - (closest_normal * dot);
-					} else {
-						player_move = remaining_move;
+					dot_frame := dot_product(remaining_move, closest_normal);
+					frame_velocity = remaining_move - (closest_normal * dot_frame);
+					dot_vel := dot_product(player.velocity, closest_normal);
+					if dot_vel < 0.0 {
+						player.velocity = player.velocity - (closest_normal * dot_vel);
 					}
 				} else {
-					player.pos += player_move;
+					player.pos += frame_velocity;
 					break;
 				}
 			}
@@ -295,6 +378,9 @@ main :: () {
 	}
 }
 
+#import "String";
+#import "Text_File_Handler";
+#import "File";
 #import "Basic";
 #import "Math";
 #import,file "sdl3.jai";

@@ -23,7 +23,7 @@ commands = {
    .mac = "./build.sh", },
  .run = { .out = "*run*", .footer_panel = false, .save_dirty_files = false,
    .win = "editor",
-   .linux = "./xml",
+   .linux = "./game",
    .mac = "./editor", },
 .open_emacs = {
    .save_dirty_files = false,

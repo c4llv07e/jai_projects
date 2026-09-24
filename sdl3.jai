@@ -91,7 +91,18 @@ SDL_KeyboardEvent :: struct {
         repeat: bool;
 };
 
-SDL_MouseButtonCode :: enum u8 {
+SDL_MouseMotionEvent :: struct {
+	type: SDL_EventType;
+	reserved: u32;
+	timestamp: u64;
+	windowID: SDL_WindowID;
+	which: SDL_MouseID;
+	state: SDL_MouseButtonFlags;
+	x, y: float32;
+	xrel, yrel: float32;
+}
+
+SDL_MouseButtonFlags :: enum u8 {
 	LEFT :: 1;
 	MIDDLE :: 2;
 	RIGHT :: 3;
@@ -99,14 +110,13 @@ SDL_MouseButtonCode :: enum u8 {
 	X2 :: 5;
 }
 
-
 SDL_MouseButtonEvent :: struct {
 	type: SDL_EventType;
 	reserved: u32;
 	timestamp: u64;
 	windowID: SDL_WindowID;
 	which: SDL_MouseID;
-	button: SDL_MouseButtonCode;
+	button: SDL_MouseButtonFlags;
 	down: bool;
 	clicks: u8;
 	padding: u8;
@@ -149,6 +159,7 @@ SDL_Event :: union {
 	window: SDL_WindowEvent;
         key: SDL_KeyboardEvent;
 	text: SDL_TextInputEvent;
+	motion: SDL_MouseMotionEvent;
 	mouse: SDL_MouseButtonEvent;
 	wheel: SDL_MouseWheelEvent;
 };
@@ -250,6 +261,7 @@ SDL_RenderClear :: (renderer: *void) -> bool #foreign sdl3;
 SDL_RenderPresent :: (renderer: *void) -> bool #foreign sdl3;
 SDL_RenderRect :: (renderer: *SDL_Renderer, rect: *SDL_FRect) -> bool #foreign sdl3;
 SDL_RenderFillRect :: (renderer: *SDL_Renderer, rect: *SDL_FRect) -> bool #foreign sdl3;
+SDL_RenderLine :: (renderer: *SDL_Renderer, x1: float32, y1: float32, x2: float32, y2: float32) -> bool #foreign sdl3;
 SDL_CreateTextureFromSurface :: (renderer: *SDL_Renderer, surface: *SDL_Surface) -> *SDL_Texture #foreign sdl3;
 SDL_SetRenderDrawBlendMode :: (renderer: *SDL_Renderer, blendMode: SDL_BlendMode) -> int #foreign sdl3;
 SDL_DestroySurface :: (surface: *SDL_Surface) #foreign sdl3;
@@ -274,6 +286,10 @@ SDL_floorf :: (x: float32) -> float32 #foreign sdl3;
 SDL_floor :: (x: float64) -> float64 #foreign sdl3;
 SDL_ceilf :: (x: float32) -> float32 #foreign sdl3;
 SDL_ceil :: (x: float64) -> float64 #foreign sdl3;
+SDL_sqrtf :: (x: float32) -> float32 #foreign sdl3;
+SDL_sqrt :: (x: float64) -> float64 #foreign sdl3;
+SDL_fabsf :: (x: float32) -> float32 #foreign sdl3;
+SDL_fabs :: (x: float64) -> float64 #foreign sdl3;
 
 #if ENABLE_TTF {
 	sdl3_ttf :: #system_library "libSDL3_ttf.so";
@@ -322,6 +338,22 @@ SDL_ceil :: (x: float64) -> float64 #foreign sdl3;
 	
 	operator + :: (a: SDL_FRect, b: SDL_FRect) -> SDL_FRect {
 		return .{a.x + b.x, a.y + b.y, a.w + b.w, a.h + b.h};
+	}
+	
+	operator + :: (a: SDL_FPoint, b: SDL_FPoint) -> SDL_FPoint {
+		return .{a.x + b.x, a.y + b.y};
+	}
+	
+	operator - :: (a: SDL_FPoint, b: SDL_FPoint) -> SDL_FPoint {
+		return .{a.x - b.x, a.y - b.y};
+	}
+	
+	operator / :: (a: SDL_FPoint, x: float32) -> SDL_FPoint {
+		return .{a.x / x, a.y / x};
+	}
+	
+	operator * :: (a: SDL_FPoint, x: float32) -> SDL_FPoint {
+		return .{a.x * x, a.y * x};
 	}
 	
 #if ENABLE_TTF {

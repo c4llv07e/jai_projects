@@ -35,6 +35,8 @@ SDL_Scancode :: enum u32 {
 	BACKSPACE :: 42;
 	RIGHT :: 79;
 	LEFT :: 80;
+	DOWN :: 81;
+	UP :: 82;
 	LCTRL :: 224;
 	LSHIFT :: 225;
 	LALT :: 226;
@@ -225,10 +227,13 @@ SDL_CreateWindow :: (title: *u8, w: int, h: int, flags: SDL_WindowFlags) -> *SDL
 SDL_CreateWindowAndRenderer :: (title: *u8, width: int, height: int, window_flags: SDL_WindowFlags, window: **void, renderer: **void) -> bool #foreign sdl3;
 SDL_GetWindowSize :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;
 SDL_GetWindowSizeInPixels :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;
+SDL_SetRenderVSync :: (renderer: *SDL_Renderer, vsync: s32) -> bool #foreign sdl3;
 SDL_PollEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
 SDL_WaitEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
 SDL_WaitEventTimeout :: (event: *SDL_Event, timeoutMS: s32) -> bool #foreign sdl3;
+SDL_GetKeyboardState :: (numkeys: *s32) -> *bool #foreign sdl3;
 SDL_StartTextInput :: (window: *SDL_Window) -> bool #foreign sdl3;
+SDL_GetTicks :: () -> u64 #foreign sdl3;
 SDL_SetRenderClipRect :: (renderer: *void, rect: *SDL_Rect) -> bool #foreign sdl3;
 #if OS != .WINDOWS {
 	SDL_SetRenderClipRectFloat :: (renderer: *void, rect: *SDL_FRect) -> bool #foreign sdl3;

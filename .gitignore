@@ -2,5 +2,9 @@
 /keybinds
 /file_browser
 /linker
+/game
+/xml
+/exhaustive_xml
+/network
 /.build/
 *.o

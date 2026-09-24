@@ -1,13 +1,13 @@
 WIN_BUILD_ENABLED :: true;
 
 configure_options :: (options: *Build_Options) {
-	options.output_executable_name = "linker";
+	options.output_executable_name = "xml";
 	options.use_visual_studio_message_format = true; // Thanks, 4coder
 	options.text_output_flags = 0; // I don't need timings much, and I would rather see more code or more errors in *compilation* window.
 }
 
 run_compilation :: (w: Workspace) {
-	add_build_file("linker.jai", w);
+	add_build_file("xml.jai", w);
 }
 
 sync_compile_c :: (path: string, output: string) -> bool {

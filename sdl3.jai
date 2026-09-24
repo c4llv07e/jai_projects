@@ -33,6 +33,7 @@ SDL_WindowID :: u32;
 SDL_Scancode :: enum u32 {
         I :: 12;
 	L :: 15;
+	M :: 16;
 	S :: 22;
 	BACKSPACE :: 42;
 	RIGHT :: 79;
@@ -240,6 +241,7 @@ SDL_CreateWindow :: (title: *u8, w: int, h: int, flags: SDL_WindowFlags) -> *SDL
 SDL_CreateWindowAndRenderer :: (title: *u8, width: int, height: int, window_flags: SDL_WindowFlags, window: **void, renderer: **void) -> bool #foreign sdl3;
 SDL_GetWindowSize :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;
 SDL_GetWindowSizeInPixels :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;
+SDL_GetModState :: () -> SDL_Keymod #foreign sdl3;
 SDL_SetRenderVSync :: (renderer: *SDL_Renderer, vsync: s32) -> bool #foreign sdl3;
 SDL_PollEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
 SDL_WaitEvent :: (event: *SDL_Event) -> bool #foreign sdl3;

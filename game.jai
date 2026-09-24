@@ -31,9 +31,15 @@ Ctx :: struct {
 	world_mouse_x, world_mouse_y: float32;
 	previous_frame_time: u64;
 	current_frame_time: u64;
+	keymod_state: SDL_Keymod;
 #if DEBUG {
 		render_fan_state: u8;
 	}
+	application_state: enum u32 {
+		GAME :: 0;
+		MAP_EDITOR;
+	} = .GAME;
+	brush_selector_rect: SDL_FRect = .{0, 0, 100, 100};
 }
 
 check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc := #caller_location) #expand {
@@ -137,14 +143,15 @@ slab_method :: (aabb: SDL_FRect, ray_origin: SDL_FRect, ray_direction: SDL_FPoin
 
 render_fan :: (using ctx: *Ctx) {
 #if DEBUG {
+		render_fan_size :: 0x20;
 		sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
-		render_fan_rect := SDL_FRect.{0, 0, 0x40, 0x40};
+		render_fan_rect := SDL_FRect.{0, 0, render_fan_size, render_fan_size};
 		SDL_RenderFillRect(renderer, *render_fan_rect);
 		sdl_set_color(renderer, .{0x40, 0x40, 0x40, 0xff});
 		render_fan_blade_rect := SDL_FRect.{
-			xx ((render_fan_state % 2) * 0x20),
-			xx ((render_fan_state / 2) * 0x20),
-			0x20, 0x20};
+			xx ((render_fan_state % 2) * render_fan_size / 2),
+			xx ((render_fan_state / 2) * render_fan_size / 2),
+			render_fan_size / 2, render_fan_size / 2};
 		SDL_RenderFillRect(renderer, *render_fan_blade_rect);
 		render_fan_state = (render_fan_state + 1) % 4;
 	} else {
@@ -255,26 +262,34 @@ rect_from_point :: (using point: SDL_FPoint, size: float32) -> SDL_FRect {
 render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x00, 0x00, 0x00, 0xff});
 	SDL_RenderClear(renderer);
+	if application_state == .MAP_EDITOR {
+		sdl_set_color(renderer, .{0x80, 0xc0, 0x80, 0xff});
+		width, height: s32;
+		SDL_GetWindowSizeInPixels(window, *width, *height);
+		rect := SDL_FRect.{0, 0, xx width, xx height};
+		SDL_RenderRect(renderer, *rect);
+	}
 	sdl_set_color(renderer, .{0xff, 0x00, 0x00, 0xff});
 	render_rect_line_on_point(ctx, project_to_camera(ctx, player.pos), player.size);
-#if DEBUG_SLAB {
-		sdl_set_color(renderer, .{0xff, 0x00, 0x00, 0xff});
-		render_rect_line_on_point(ctx, .{mouse_x, mouse_y}, 32);
-		sdl_set_color(renderer, .{0x00, 0x00, 0xff, 0xff});
-		render_rect_line_on_point(ctx, project_to_camera(ctx, .{world_mouse_x, world_mouse_y}), 16);
-		sdl_set_color(renderer, .{0xff, 0xff, 0x00, 0xff});
-		sdl_render_line(renderer, project_to_camera(ctx, player.pos), .{mouse_x, mouse_y});
-		for scene.brushes {
-			line := SDL_FPoint.{world_mouse_x, world_mouse_y} - player.pos;
-			line_length := vec_length(line);
-			hit, t_hit, normal := slab_method(it.rect, rect_from_point(player.pos, player.size), line / line_length);
-			if hit && t_hit <= line_length {
-				sdl_set_color(renderer, .{0x00, 0xff, 0xff, 0xff});
-				render_rect_line_on_point(ctx, project_to_camera(ctx, player.pos + line / line_length * t_hit), 32);
-			}
+	render_scene(ctx);
+	if application_state == .MAP_EDITOR {
+		sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
+		SDL_RenderFillRect(renderer, *brush_selector_rect);
+		sdl_set_color(renderer, .{0x20, 0x60, 0x20, 0xff});
+		SDL_RenderRect(renderer, *brush_selector_rect);
+		for brush, brush_index: scene.brushes {
+			padding :: 4.0;
+			element_size :: 16.0;
+			sdl_set_color(renderer, brush.color);
+			rect := SDL_FRect.{
+				brush_selector_rect.x + padding,
+				brush_selector_rect.y + padding + ((element_size + padding) * brush_index),
+				brush_selector_rect.w - padding * 2,
+				element_size,
+			};
+			SDL_RenderRect(renderer, *rect);
 		}
 	}
-	render_scene(ctx);
 	render_fan(ctx);
 	SDL_RenderPresent(renderer);
 }
@@ -305,6 +320,7 @@ main :: () {
 		current_frame_time := SDL_GetTicks();
 		deltatime = (current_frame_time - previous_frame_time) / 1000.0;
 		previous_frame_time = current_frame_time;
+		keymod_state = SDL_GetModState();
 		while SDL_PollEvent(*event) {
 			if event.type == {
 				case .QUIT;
@@ -312,9 +328,21 @@ main :: () {
 				case .KEY_DOWN;
 				if event.key.scancode == {
 					case .S;
-					save_scene(*ctx, "main.scene");
+					if keymod_state & .CTRL {
+						save_scene(*ctx, "main.scene");
+					}
 					case .L;
-					load_scene(*ctx, "main.scene");
+					if keymod_state & .CTRL {
+						load_scene(*ctx, "main.scene");
+					}
+					case .M;
+					if keymod_state & .CTRL {
+						if application_state == .GAME {
+							application_state = .MAP_EDITOR;
+						} else {
+							application_state = .GAME;
+						}
+					}
 				}
 				case .MOUSE_MOTION;
 				mouse_x = event.motion.x;
@@ -330,47 +358,51 @@ main :: () {
 			desired_move /= desired_length;
 		}
 		desired_move *= player.max_speed;
-		rate := SDL_FPoint.{
-			x = ifx desired_move.x != 0.0 then player.accel_rate else player.decel_rate,
-			y = ifx desired_move.y != 0.0 then player.accel_rate else player.decel_rate,
-		};
-		player.velocity += (desired_move - player.velocity) * (.{1.0, 1.0} - SDL_expf(rate * -deltatime));
-		if SDL_fabsf(player.velocity.x) < 0.1 player.velocity.x = 0.0;
-		if SDL_fabsf(player.velocity.y) < 0.1 player.velocity.y = 0.0;
-		frame_velocity := player.velocity * deltatime;
-		if frame_velocity.x != 0 || frame_velocity.y != 0 {
-			for 0..2 {
-				move_len := vec_length(player.velocity);
-				if move_len < 1.0e-4 break;
-				norm_move := frame_velocity / move_len;
-				closest_t := move_len;
-				closest_normal: SDL_FPoint;
-				hit_anything := false;
-				for scene.brushes {
-					hit, t_hit, normal := slab_method(it.rect, rect_from_point(player.pos, player.size), norm_move);
-					if hit && t_hit >= 0 && t_hit < closest_t {
-						closest_t = t_hit;
-						closest_normal = normal;
-						hit_anything = true;
+		if application_state == .GAME {
+			rate := SDL_FPoint.{
+				x = ifx desired_move.x != 0.0 then player.accel_rate else player.decel_rate,
+				y = ifx desired_move.y != 0.0 then player.accel_rate else player.decel_rate,
+			};
+			player.velocity += (desired_move - player.velocity) * (.{1.0, 1.0} - SDL_expf(rate * -deltatime));
+			if SDL_fabsf(player.velocity.x) < 0.1 player.velocity.x = 0.0;
+			if SDL_fabsf(player.velocity.y) < 0.1 player.velocity.y = 0.0;
+			frame_velocity := player.velocity * deltatime;
+			if frame_velocity.x != 0 || frame_velocity.y != 0 {
+				for 0..2 {
+					move_len := vec_length(player.velocity);
+					if move_len < 1.0e-4 break;
+					norm_move := frame_velocity / move_len;
+					closest_t := move_len;
+					closest_normal: SDL_FPoint;
+					hit_anything := false;
+					for scene.brushes {
+						hit, t_hit, normal := slab_method(it.rect, rect_from_point(player.pos, player.size), norm_move);
+						if hit && t_hit >= 0 && t_hit < closest_t {
+							closest_t = t_hit;
+							closest_normal = normal;
+							hit_anything = true;
+						}
 					}
-				}
-				if hit_anything {
-					padding :: 0.01;
-					t_to_move := max(0.0, closest_t - padding);
-					player.pos += norm_move * t_to_move;
-					remaining_length := move_len - closest_t;
-					remaining_move := norm_move * remaining_length;
-					dot_frame := dot_product(remaining_move, closest_normal);
-					frame_velocity = remaining_move - (closest_normal * dot_frame);
-					dot_vel := dot_product(player.velocity, closest_normal);
-					if dot_vel < 0.0 {
-						player.velocity = player.velocity - (closest_normal * dot_vel);
+					if hit_anything {
+						padding :: 0.01;
+						t_to_move := max(0.0, closest_t - padding);
+						player.pos += norm_move * t_to_move;
+						remaining_length := move_len - closest_t;
+						remaining_move := norm_move * remaining_length;
+						dot_frame := dot_product(remaining_move, closest_normal);
+						frame_velocity = remaining_move - (closest_normal * dot_frame);
+						dot_vel := dot_product(player.velocity, closest_normal);
+						if dot_vel < 0.0 {
+							player.velocity = player.velocity - (closest_normal * dot_vel);
+						}
+					} else {
+						player.pos += frame_velocity;
+						break;
 					}
-				} else {
-					player.pos += frame_velocity;
-					break;
 				}
 			}
+		} else {
+			player.pos += desired_move * deltatime;
 		}
 		camera = player.pos;
 		world_mouse_x, world_mouse_y = project_from_camera(*ctx, mouse_x, mouse_y);

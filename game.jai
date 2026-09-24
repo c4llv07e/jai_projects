@@ -99,13 +99,12 @@ slab_method :: (aabb: SDL_FRect, ray_origin: SDL_FPoint, ray_direction: SDL_FPoi
 			ood := 1.0 / ray_dir[it];
 			t1 := (rect_min[it] - ray_orig[it]) * ood;
 			t2 := (rect_max[it] - ray_orig[it]) * ood;
-			sign := ifx ood < 0.0 then 1.0 else -1.0;
 			if t1 > t2 {
 				Swap(*t1, *t2);
-				sign = -sign;
 			}
 			if t1 > tmin {
 				tmin = t1;
+				sign := ifx ray_dir[it] > 0.0 then -1.0 else 1.0;
 				out_normal = .{0, 0}; 
 				if it == 0 then out_normal.x = sign;
 				else out_normal.y = sign;
@@ -120,9 +119,16 @@ slab_method :: (aabb: SDL_FRect, ray_origin: SDL_FPoint, ray_direction: SDL_FPoi
 	return true, tmin, out_normal;
 }
 
+DEBUG_SLAB :: false;
 slab_method :: (aabb: SDL_FRect, ray_origin: SDL_FRect, ray_direction: SDL_FPoint) -> hit: bool, t_hit: float32, normal: SDL_FPoint {
-	hit, t_hit, normal := slab_method(aabb + SDL_FRect.{-ray_origin.w, -ray_origin.h, ray_origin.w, ray_origin.h},
-					  SDL_FPoint.{ray_origin.x, ray_origin.y}, ray_direction);
+#if DEBUG_SLAB {
+		sdl_set_color(_ctx.renderer, .{0xff, 0xff, 0xff, 0xff});
+		rect := aabb + SDL_FRect.{-ray_origin.w / 2, -ray_origin.h / 2, ray_origin.w, ray_origin.h};
+		projected := project_to_camera(_ctx, rect);
+		SDL_RenderRect(_ctx.renderer, *projected);
+	}
+	hit, t_hit, normal := slab_method(aabb + SDL_FRect.{-ray_origin.w / 2, -ray_origin.h / 2, ray_origin.w, ray_origin.h},
+					  SDL_FPoint.{ray_origin.x + ray_origin.w / 2, ray_origin.y + ray_origin.h / 2}, ray_direction);
 	return hit, t_hit, normal;
 }
 
@@ -159,6 +165,10 @@ load_scene :: (using ctx: *Ctx) {
 			  color = .{0x40, 0x60, 0x40, 0xff},
 		  });
 	array_add(*ctx.scene.brushes, .{
+			  rect = .{200, 0, 200, 20},
+			  color = .{0x40, 0x60, 0x40, 0xff},
+		  });
+	array_add(*ctx.scene.brushes, .{
 			  rect = .{200, 0, 20, 200},
 			  color = .{0x40, 0x60, 0x40, 0xff},
 		  });
@@ -185,19 +195,21 @@ render :: (using ctx: *Ctx) {
 	SDL_RenderClear(renderer);
 	sdl_set_color(renderer, .{0xff, 0x00, 0x00, 0xff});
 	render_rect_line_on_point(ctx, project_to_camera(ctx, player.pos), player.size);
-	sdl_set_color(renderer, .{0xff, 0x00, 0x00, 0xff});
-	render_rect_line_on_point(ctx, .{mouse_x, mouse_y}, 32);
-	sdl_set_color(renderer, .{0x00, 0x00, 0xff, 0xff});
-	render_rect_line_on_point(ctx, project_to_camera(ctx, .{world_mouse_x, world_mouse_y}), 16);
-	sdl_set_color(renderer, .{0xff, 0xff, 0x00, 0xff});
-	sdl_render_line(renderer, project_to_camera(ctx, player.pos), .{mouse_x, mouse_y});
-	for scene.brushes {
-		line := SDL_FPoint.{world_mouse_x, world_mouse_y} - player.pos;
-		line_length := vec_length(line);
-		hit, t_hit, normal := slab_method(it.rect, rect_from_point(player.pos, player.size), line / line_length);
-		if hit && t_hit <= line_length {
-			sdl_set_color(renderer, .{0x00, 0xff, 0xff, 0xff});
-			render_rect_line_on_point(ctx, project_to_camera(ctx, player.pos + line / line_length * t_hit), 32);
+#if DEBUG_SLAB {
+		sdl_set_color(renderer, .{0xff, 0x00, 0x00, 0xff});
+		render_rect_line_on_point(ctx, .{mouse_x, mouse_y}, 32);
+		sdl_set_color(renderer, .{0x00, 0x00, 0xff, 0xff});
+		render_rect_line_on_point(ctx, project_to_camera(ctx, .{world_mouse_x, world_mouse_y}), 16);
+		sdl_set_color(renderer, .{0xff, 0xff, 0x00, 0xff});
+		sdl_render_line(renderer, project_to_camera(ctx, player.pos), .{mouse_x, mouse_y});
+		for scene.brushes {
+			line := SDL_FPoint.{world_mouse_x, world_mouse_y} - player.pos;
+			line_length := vec_length(line);
+			hit, t_hit, normal := slab_method(it.rect, rect_from_point(player.pos, player.size), line / line_length);
+			if hit && t_hit <= line_length {
+				sdl_set_color(renderer, .{0x00, 0xff, 0xff, 0xff});
+				render_rect_line_on_point(ctx, project_to_camera(ctx, player.pos + line / line_length * t_hit), 32);
+			}
 		}
 	}
 	render_scene(ctx);
@@ -205,9 +217,15 @@ render :: (using ctx: *Ctx) {
 	SDL_RenderPresent(renderer);
 }
 
+dot_product :: (a: SDL_FPoint, b: SDL_FPoint) -> float32 {
+	return a.x * b.x + a.y * b.y;
+}
+
+_ctx: *Ctx;
 main :: () {
 	using ctx := Ctx.{
 	};
+	_ctx = *ctx;
 	initial_width :: 800;
 	initial_height :: 600;
 	check_sdl(SDL_Init(.VIDEO), "Can't init SDL");
@@ -220,6 +238,8 @@ main :: () {
 	load_scene(*ctx);
 	player.speed = 400;
 	previous_frame_time = SDL_GetTicks();
+	player_move: SDL_FPoint;
+	player.x = -60;
 	while main_loop := true {
 		current_frame_time := SDL_GetTicks();
 		deltatime = (current_frame_time - previous_frame_time) / 1000.0;
@@ -233,8 +253,42 @@ main :: () {
 				mouse_y = event.motion.y;
 			}
 		}
-		player.pos.y += player.speed * (cast(s8)buttons[SDL_Scancode.DOWN] - cast(s8)buttons[SDL_Scancode.UP]) * deltatime;
-		player.pos.x += player.speed * (cast(s8)buttons[SDL_Scancode.RIGHT] - cast(s8)buttons[SDL_Scancode.LEFT]) * deltatime;
+		player_move.x = player.speed * (cast(s8)buttons[SDL_Scancode.RIGHT] - cast(s8)buttons[SDL_Scancode.LEFT]) * deltatime;
+		player_move.y = player.speed * (cast(s8)buttons[SDL_Scancode.DOWN] - cast(s8)buttons[SDL_Scancode.UP]) * deltatime;
+		if player_move.x != 0 || player_move.y != 0 {
+			for 0..2 {
+				move_len := vec_length(player_move);
+				if move_len < 0.0e-3 break;
+				norm_move := player_move / move_len;
+				closest_t := move_len;
+				closest_normal: SDL_FPoint;
+				hit_anything := false;
+				for scene.brushes {
+					hit, t_hit, normal := slab_method(it.rect, rect_from_point(player.pos, player.size), norm_move);
+					if hit && t_hit >= 0 && t_hit < closest_t {
+						closest_t = t_hit;
+						closest_normal = normal;
+						hit_anything = true;
+					}
+				}
+				if hit_anything {
+					padding :: 0.01;
+					t_to_move := max(0.0, closest_t - padding);
+					player.pos += norm_move * t_to_move;
+					remaining_length := move_len - closest_t;
+					remaining_move := norm_move * remaining_length;
+					dot := dot_product(remaining_move, closest_normal);
+					if dot < 0.0 {
+						player_move = remaining_move - (closest_normal * dot);
+					} else {
+						player_move = remaining_move;
+					}
+				} else {
+					player.pos += player_move;
+					break;
+				}
+			}
+		}
 		camera = player.pos;
 		world_mouse_x, world_mouse_y = project_from_camera(*ctx, mouse_x, mouse_y);
 		render(*ctx);

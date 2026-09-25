@@ -40,6 +40,7 @@ Ctx :: struct {
 		MAP_EDITOR;
 	} = .GAME;
 	brush_selector_rect: SDL_FRect = .{0, 0, 100, 100};
+	selected_brush_index: s64 = 0;
 }
 
 check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc := #caller_location) #expand {
@@ -259,6 +260,7 @@ rect_from_point :: (using point: SDL_FPoint, size: float32) -> SDL_FRect {
 	return .{x - size / 2, y - size / 2, size, size};
 }
 
+RENDER_FAN :: false;
 render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x00, 0x00, 0x00, 0xff});
 	SDL_RenderClear(renderer);
@@ -287,10 +289,16 @@ render :: (using ctx: *Ctx) {
 				brush_selector_rect.w - padding * 2,
 				element_size,
 			};
-			SDL_RenderRect(renderer, *rect);
+			if selected_brush_index == brush_index {
+				SDL_RenderFillRect(renderer, *rect);
+			} else {
+				SDL_RenderRect(renderer, *rect);
+			}
 		}
 	}
-	render_fan(ctx);
+#if RENDER_FAN {
+		render_fan(ctx);
+	}
 	SDL_RenderPresent(renderer);
 }
 

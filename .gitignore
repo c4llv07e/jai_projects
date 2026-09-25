@@ -6,5 +6,6 @@
 /xml
 /exhaustive_xml
 /network
+/ui
 /.build/
 *.o

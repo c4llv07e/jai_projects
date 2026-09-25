@@ -1,28 +1,39 @@
 
-Element_Type :: enum s32 {
-	NONE :: 0;
-	BUTTON;
-	LABEL;
+Element_Flags :: enum_flags u32 {
+	Clickable;
+	Scrollable;
+	Text;
+	Border;
+	Background;
+	Clip;
+	Slider; // Ryan, I curse you! You've said something about "OOP virus" and now what? You're using `custom_draw` function pointer for different rendering! It's literally the most OOP-ish polymorphism!
 }
 
-Element :: union {
-	type: Element_Type = .NONE;
-	label: Label_Element;
-	button: Button_Element;
+Mouse_Buttons_State :: enum_flags u8 {
+	LEFT;
+	RIGHT;
+	MIDDLE;
+	BACK;
+	FORWARD;
 }
 
-Button_Element :: struct {
-	type: Element_Type  = .BUTTON;
-	rect: SDL_FRect;
-	inner_color: SDL_Color;
-	border_color: SDL_Color;
+Element_Frame_Data :: struct {
+	clicked: Mouse_Buttons_State;
+	hovered: bool;
 }
 
-Label_Element :: struct {
-	type: Element_Type = .LABEL;
+Element :: struct {
+	flags: Element_Flags;
+	using rect: SDL_FRect;
 	text: string;
-	using position: SDL_FPoint;
-	color: SDL_Color;
+	frame_data: Element_Frame_Data;
+	background_color: SDL_Color;
+	border_color: SDL_Color;
+	children: [..]Element;
+	padding: float32;
+	union {
+		slider_value: *float32;
+	}
 }
 
 Ctx :: struct {
@@ -34,9 +45,7 @@ Ctx :: struct {
 	previous_frame_time: u64;
 	current_frame_time: u64;
 	keymod_state: SDL_Keymod;
-	immediate_cursor: SDL_FPoint;
-	label_height: float32 = 24;
-	elements: [..]Element;
+	root: Element;
 }
 
 check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc := #caller_location) #expand {
@@ -68,38 +77,95 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float32, y: float32, 
 	SDL_RenderTexture(renderer, texture, null, *dstrect);
 }
 
-render_ui :: (using ctx: *Ctx) {
-	for element, element_index: elements {
-		if element.type == {
-			case .LABEL;
-			label := element.label;
-			draw_text(renderer, font, label.x, label.y, label.text, label.color);
-			case;
-			log("Unknown element type %", element.type);
-			exit(-1);
-		}
+render_element :: (using ctx: *Ctx, element: Element, offset: SDL_FPoint = .{0.0, 0.0}) {
+	off_rect := element.rect + offset;
+	if element.flags & .Background {
+		sdl_set_color(renderer, element.background_color);
+		SDL_RenderFillRect(renderer, *off_rect);
+	}
+	if element.flags & .Border {
+		sdl_set_color(renderer, element.border_color);
+		SDL_RenderRect(renderer, *off_rect);
+	}
+	if element.flags & .Text {
+		draw_text(renderer, font, off_rect.x + element.padding, off_rect.y, element.text);
+	}
+	if element.flags & .Slider {
+		sdl_set_color(renderer, .{0x00, 0xff, 0x00, 0xff});
+		rect := SDL_FRect.{off_rect.x + (element.slider_value.*) * off_rect.w, off_rect.y, off_rect.h, off_rect.h};
+		SDL_RenderFillRect(renderer, *rect);
+	}
+	for child, child_index: element.children {
+		render_element(ctx, child, rect_origin(off_rect));
 	}
 }
 
 render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
-	render_ui(ctx);
+	render_element(ctx, root);
 	SDL_RenderPresent(renderer);
 }
 
-label :: (using ctx: *Ctx, text: string, color := SDL_Color.{0xe3, 0xe3, 0xe3, 0xff}) {
-	array_add(*elements, Element.{label = .{
-				  text = text,
-				  position = immediate_cursor,
-				  color = color,
-			  }});
-	immediate_cursor.y += label_height;
+// Doesn't own or copy anything, manage memory yourself.
+label :: (font: *TTF_Font, text: string, background_color := SDL_Color.{0, 0, 0, 0}, border_color := SDL_Color.{0, 0, 0, 0}) -> Element {
+	background_bit: Element_Flags = ifx background_color.a != 0 then Element_Flags.Background else 0;
+	border_bit: Element_Flags = ifx border_color.a != 0 then Element_Flags.Border else 0;
+	font_height := TTF_GetFontHeight(font);
+	ok, text_width := sdl_measure_string(font, text);
+	return .{
+		flags = .Text | background_bit | border_bit,
+		text = text,
+		rect = .{0, 0, xx text_width, xx font_height},
+		border_color = border_color,
+		background_color = background_color,
+	};
 }
 
-end_ui_frame :: (using ctx: *Ctx) {
-	immediate_cursor = .{0, 0};
-	array_reset(*elements);
+slider :: (val: *float32, width: float32 = 100.0, background_color := SDL_Color.{0x10, 0x30, 0x10, 0xff}, border_color := SDL_Color.{0, 0, 0, 0}) -> Element {
+	border_bit: Element_Flags = ifx border_color.a != 0 then Element_Flags.Border else 0;
+	return .{
+		flags = .Background | border_bit | .Slider,
+		rect = .{
+			0, 0, width, 24,
+		},
+		slider_value = val,
+		border_color = border_color,
+		background_color = background_color,
+	};
+}
+
+button :: (text: string = "", font: *TTF_Font = null, background_color := SDL_Color.{0x20, 0x20, 0x20, 0x20}, border_color := SDL_Color.{0x20, 0x60, 0x20, 0xff}, padding: float32 = 6.0) -> Element {
+	if text.count > 0 && font == null {
+		log("Warning, button get text but not font, can't determine height and width of the button due to it!");
+	}
+	font_height: s32 = 0;
+	text_width: s32 = 0;
+	if font != null {
+		ok: bool;
+		font_height = TTF_GetFontHeight(font);
+		ok, text_width = sdl_measure_string(font, text);
+	}
+	return .{
+		flags = .Text | .Background | .Border | .Clickable,
+		text = text,
+		rect = .{0, 0, (xx text_width) + padding * 2, xx font_height},
+		border_color = border_color,
+		background_color = background_color,
+		padding = padding,
+	};
+}
+
+recalculate_layout :: (tree: *Element, margin: float32 = 0.0) {
+	accum_height: float32 = 0.0;
+	for * child: tree.children {
+		child.y = accum_height;
+		recalculate_layout(child, margin);
+		accum_height += child.h + margin;
+	}
+	if accum_height > tree.h {
+		tree.h = accum_height;
+	}
 }
 
 main :: () {
@@ -113,8 +179,13 @@ main :: () {
 	font = TTF_OpenFont("/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf", 24);
 	assert(font != null, "Can't load font");
 	SDL_SetRenderVSync(renderer, 1);
-	elements.allocator = temp;
 	event: SDL_Event;
+	val: float32;
+	array_add(*ctx.root.children, label(font, "test"));
+	array_add(*ctx.root.children, label(font, "second"));
+	array_add(*ctx.root.children, slider(*val));
+	array_add(*ctx.root.children, button("press me", font));
+	recalculate_layout(*ctx.root, 5.0);
 	previous_frame_time = SDL_GetTicks();
 	while main_loop := true {
 		current_frame_time := SDL_GetTicks();
@@ -125,12 +196,15 @@ main :: () {
 			if event.type == {
 				case .QUIT;
 				break main_loop;
+				case .MOUSE_MOTION;
+				ctx.root.x = event.motion.x;
+				ctx.root.y = event.motion.y;
+				case .MOUSE_BUTTON_DOWN;
+				array_add(*ctx.root.children, label(font, "Clicked!"));
+				recalculate_layout(*ctx.root, 5.0);
 			}
 		}
-		label(*ctx, "test");
-		label(*ctx, "second");
 		render(*ctx);
-		end_ui_frame(*ctx);
 		reset_temporary_storage();
 	}
 }

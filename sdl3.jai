@@ -309,6 +309,7 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 	TTF_MeasureString :: (font: *TTF_Font, text: *u8, length: u64, max_width: s32, measured_width: *s32, measured_length: *u64) -> bool #foreign sdl3_ttf;
 	TTF_SetFontSize :: (font: *TTF_Font, ptsize: float32) -> bool #foreign sdl3_ttf;
 	TTF_GetFontSize :: (font: *TTF_Font) -> float32 #foreign sdl3_ttf;
+	TTF_GetFontHeight :: (font: *TTF_Font) -> s32 #foreign sdl3_ttf;
 }
 
 #if ENABLE_JAI_FEATURES {
@@ -349,12 +350,20 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 		};
 	}
 	
+	rect_origin :: inline (rect: SDL_FRect) -> SDL_FPoint {
+		return .{rect.x, rect.y};
+	}
+	
 	operator + :: (a: SDL_FRect, b: SDL_FRect) -> SDL_FRect {
 		return .{a.x + b.x, a.y + b.y, a.w + b.w, a.h + b.h};
 	}
 	
 	operator + :: (a: SDL_FPoint, b: SDL_FPoint) -> SDL_FPoint {
 		return .{a.x + b.x, a.y + b.y};
+	}
+	
+	operator + :: (r: SDL_FRect, p: SDL_FPoint) -> SDL_FRect {
+		return .{r.x + p.x, r.y + p.y, r.w, r.h};
 	}
 	
 	operator - :: (a: SDL_FPoint, b: SDL_FPoint) -> SDL_FPoint {
@@ -374,7 +383,7 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 	}
 	
 #if ENABLE_TTF {
-		sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32) -> (bool, s32, u64) {
+		sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32 = 0) -> (bool, s32, u64) {
 			measured_width: s32;
 			measured_length: u64;
 			res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);

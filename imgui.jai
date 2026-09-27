@@ -37,6 +37,7 @@ Widget :: struct {
 null_widget: Widget;
 
 Entities :: struct {
+	should_delete: bool = false;
 	time: u64;
 }
 
@@ -169,6 +170,14 @@ render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
 	for widget: widget_stack {
+		if widget.flags & .Draw_Background {
+			sdl_set_color(renderer, widget.background_color);
+			SDL_RenderFillRect(renderer, *widget.rect);
+		}
+		if widget.flags & .Draw_Border {
+			sdl_set_color(renderer, widget.border_color);
+			SDL_RenderRect(renderer, *widget.rect);
+		}
 		if widget.flags & .Draw_Text {
 			draw_text(renderer, widget.font, widget.x, widget.y, widget.text, widget.text_color);
 		}
@@ -205,7 +214,21 @@ prune_old_widgets :: (using ctx: *Ctx) {
 
 calculate_layout :: (using ctx: *Ctx) {
 	for widget, widget_index: widget_stack {
-		widget.y = xx (widget_index * 24);
+		widget.y = xx (widget_index * 26);
+	}
+}
+
+prune_entities :: (using ctx: *Ctx) {
+	iter := 0;
+	while iter < entities.count {
+		if entities[iter].should_delete {
+			if iter < entities.count - 1 {
+				memcpy(*entities[iter], *entities[iter + 1], size_of(type_of(entities[iter])) * (entities.count - 1 - iter));
+			}
+			entities.count -= 1;
+		} else {
+			iter += 1;
+		}
 	}
 }
 
@@ -245,9 +268,12 @@ main :: () {
 			log("Added entity at %", current_frame_time);
 			array_add(*entities, .{time = current_frame_time});
 		}
-		for entity: entities {
-			if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT remove;
+		for * entity: entities {
+			if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT {
+				entity.should_delete = true;
+			}
 		}
+		prune_entities(*ctx);
 		calculate_layout(*ctx);
 		render(*ctx);
 		widget_stack.count = 0;

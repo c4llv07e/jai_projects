@@ -1,6 +1,7 @@
 
 Element_Flags :: enum_flags u32 {
 	Clickable;
+	Hoverable;
 	Scrollable;
 	Text;
 	Border;
@@ -30,6 +31,7 @@ Element :: struct {
 	background_color: SDL_Color;
 	border_color: SDL_Color;
 	children: [..]Element;
+	id: s64;
 	padding: float32;
 	union {
 		slider_value: *float32;
@@ -135,7 +137,7 @@ slider :: (val: *float32, width: float32 = 100.0, background_color := SDL_Color.
 	};
 }
 
-button :: (text: string = "", font: *TTF_Font = null, background_color := SDL_Color.{0x20, 0x20, 0x20, 0x20}, border_color := SDL_Color.{0x20, 0x60, 0x20, 0xff}, padding: float32 = 6.0) -> Element {
+button :: (text: string = "", font: *TTF_Font = null, id: s64 = 0, background_color := SDL_Color.{0x20, 0x20, 0x20, 0x20}, border_color := SDL_Color.{0x20, 0x60, 0x20, 0xff}, padding: float32 = 6.0) -> Element {
 	if text.count > 0 && font == null {
 		log("Warning, button get text but not font, can't determine height and width of the button due to it!");
 	}
@@ -152,6 +154,7 @@ button :: (text: string = "", font: *TTF_Font = null, background_color := SDL_Co
 		rect = .{0, 0, (xx text_width) + padding * 2, xx font_height},
 		border_color = border_color,
 		background_color = background_color,
+		id = id,
 		padding = padding,
 	};
 }
@@ -167,6 +170,24 @@ recalculate_layout :: (tree: *Element, margin: float32 = 0.0) {
 		tree.h = accum_height;
 	}
 }
+
+// Id 0 considered unclickable. .Clicable with zero id is forbidden.
+hit_test :: (tree: *Element, point: SDL_FPoint, flags: Element_Flags = .Clickable) -> *Element {
+	if tree.flags & .Clickable {
+		if is_intersecting(tree.rect, point) {
+			return tree;
+		}
+	}
+	for * child: tree.children {
+		res := hit_test(child, point - .{tree.x, tree.y});
+		if res != null {
+			return res;
+		}
+	}
+	return null;
+}
+
+press_me_id :: 1;
 
 main :: () {
 	using ctx := Ctx.{
@@ -184,7 +205,7 @@ main :: () {
 	array_add(*ctx.root.children, label(font, "test"));
 	array_add(*ctx.root.children, label(font, "second"));
 	array_add(*ctx.root.children, slider(*val));
-	array_add(*ctx.root.children, button("press me", font));
+	array_add(*ctx.root.children, button("press me", font, press_me_id));
 	recalculate_layout(*ctx.root, 5.0);
 	previous_frame_time = SDL_GetTicks();
 	while main_loop := true {
@@ -197,11 +218,24 @@ main :: () {
 				case .QUIT;
 				break main_loop;
 				case .MOUSE_MOTION;
-				ctx.root.x = event.motion.x;
-				ctx.root.y = event.motion.y;
+				hovered_element := hit_test(*ctx.root, .{event.motion.x, event.motion.y}, .Hoverable);
+				if hovered_element == null continue;
+				if hovered_element.id == {
+					case press_me_id;
+					hovered_element.background_color = .{0xff, 0x00, 0xff, 0x00};
+				}
 				case .MOUSE_BUTTON_DOWN;
-				array_add(*ctx.root.children, label(font, "Clicked!"));
-				recalculate_layout(*ctx.root, 5.0);
+				if event.mouse.button == .LEFT {
+					clicked_element := hit_test(*ctx.root, .{event.mouse.x, event.mouse.y});
+					if clicked_element == null continue;
+					if clicked_element.id == {
+						case press_me_id;
+						log("pressed \"press me\" button");
+					}
+				} else if event.mouse.button == .RIGHT {
+					ctx.root.x = event.mouse.x;
+					ctx.root.y = event.mouse.y;
+				}
 			}
 		}
 		render(*ctx);

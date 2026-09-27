@@ -7,5 +7,6 @@
 /exhaustive_xml
 /network
 /ui
+/imgui
 /.build/
 *.o

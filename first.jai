@@ -1,13 +1,13 @@
 WIN_BUILD_ENABLED :: true;
 
 configure_options :: (options: *Build_Options) {
-	options.output_executable_name = "ui";
+	options.output_executable_name = "imgui";
 	options.use_visual_studio_message_format = true; // Thanks, 4coder
 	options.text_output_flags = 0; // I don't need timings much, and I would rather see more code or more errors in *compilation* window.
 }
 
 run_compilation :: (w: Workspace) {
-	add_build_file("ui.jai", w);
+	add_build_file("imgui.jai", w);
 }
 
 sync_compile_c :: (path: string, output: string) -> bool {

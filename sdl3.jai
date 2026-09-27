@@ -105,12 +105,20 @@ SDL_MouseMotionEvent :: struct {
 	xrel, yrel: float32;
 }
 
-SDL_MouseButtonFlags :: enum u8 {
+SDL_MouseButtonEnum :: enum u8 {
 	LEFT :: 1;
 	MIDDLE :: 2;
 	RIGHT :: 3;
 	X1 :: 4;
 	X2 :: 5;
+}
+
+SDL_MouseButtonFlags :: enum_flags u32 {
+	LEFT :: 1;
+	MIDDLE :: 2;
+	RIGHT :: 4;
+	X1 :: 8;
+	X2 :: 16;
 }
 
 SDL_MouseButtonEvent :: struct {
@@ -119,7 +127,7 @@ SDL_MouseButtonEvent :: struct {
 	timestamp: u64;
 	windowID: SDL_WindowID;
 	which: SDL_MouseID;
-	button: SDL_MouseButtonFlags;
+	button: SDL_MouseButtonEnum;
 	down: bool;
 	clicks: u8;
 	padding: u8;
@@ -383,7 +391,7 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 	}
 	
 #if ENABLE_TTF {
-		sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32 = 0) -> (bool, s32, u64) {
+		sdl_measure_string :: (font: *TTF_Font, text: string, max_width: s32 = 0) -> (ok: bool, width: s32, length: u64) {
 			measured_width: s32;
 			measured_length: u64;
 			res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);

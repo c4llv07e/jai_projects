@@ -48,6 +48,7 @@ Ctx :: struct {
 	current_frame_time: u64;
 	keymod_state: SDL_Keymod;
 	root: Element;
+	last_hovered_element: *Element = null;
 }
 
 check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc := #caller_location) #expand {
@@ -187,6 +188,16 @@ hit_test :: (tree: *Element, point: SDL_FPoint, flags: Element_Flags = .Clickabl
 	return null;
 }
 
+hover_logic :: (element: *Element, hovered := true) {
+	if element == null return;
+	if element.id == {
+		case press_me_id;
+		background_color := SDL_Color.{0x00, 0x00, 0x00, 0xff};
+		if hovered then background_color = SDL_Color.{0xff, 0x00, 0xff, 0xff};
+		element.background_color = background_color;
+	}
+}
+
 press_me_id :: 1;
 
 main :: () {
@@ -219,11 +230,9 @@ main :: () {
 				break main_loop;
 				case .MOUSE_MOTION;
 				hovered_element := hit_test(*ctx.root, .{event.motion.x, event.motion.y}, .Hoverable);
-				if hovered_element == null continue;
-				if hovered_element.id == {
-					case press_me_id;
-					hovered_element.background_color = .{0xff, 0x00, 0xff, 0x00};
-				}
+				hover_logic(last_hovered_element, hovered_element == last_hovered_element);
+				last_hovered_element = hovered_element;
+				hover_logic(hovered_element);
 				case .MOUSE_BUTTON_DOWN;
 				if event.mouse.button == .LEFT {
 					clicked_element := hit_test(*ctx.root, .{event.mouse.x, event.mouse.y});

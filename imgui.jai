@@ -39,6 +39,63 @@ Widget_Signal :: struct {
 	hovered: bool;
 }
 
+Stack :: struct(element_type: Type, default: element_type) {
+	array: [..]element_type;
+	pop_next: bool;
+}
+
+stack_push :: (stack: *Stack, value: stack.element_type) {
+	array_add(*stack.array, value);
+}
+
+stack_pop :: (stack: *Stack) -> stack.element_type {
+	stack.pop_next = false;
+	return pop(*stack.array);
+}
+
+stack_peek :: (stack: Stack) -> stack.element_type {
+	return peek(stack.array);
+}
+
+stack_set_next :: (stack: *Stack, value: stack.element_type) {
+	assert(!stack.pop_next, "Trying to put multiple values for next element!");
+	stack_push(*stack.array, value);
+	stack.pop_next = true;
+}
+
+Widget_Stacks :: struct {
+	parents: Stack(*Widget, *null_widget);
+	seed: Stack(u64, 123);
+	pref_width: Stack(Widget_Size, .{property = .Pixels, value = 250.0});
+	pref_height: Stack(Widget_Size, .{property = .Pixels, value = 50.0});
+}
+
+pop_unused :: (stacks: *Widget_Stacks) {
+#insert -> string {
+		sb: String_Builder;
+		ti :: type_info(Widget_Stacks);
+		for stack_ti: ti.members {
+			if stack_ti.type.type != .STRUCT continue;
+			stack_struct_ti := cast(*Type_Info_Struct)stack_ti.type;
+			print_to_builder(*sb, "if stacks.%1.pop_next then stack_pop(*stacks.%1);\n", stack_ti.name);
+		}
+		return builder_to_string(*sb);
+	}
+}
+
+init_stacks :: (stacks: *Widget_Stacks) {
+#insert -> string {
+		sb: String_Builder;
+		ti :: type_info(Widget_Stacks);
+		for stack_ti: ti.members {
+			if stack_ti.type.type != .STRUCT continue;
+			stack_struct_ti := cast(*Type_Info_Struct)stack_ti.type;
+			print_to_builder(*sb, "stack_push(*stacks.%1, stacks.%1.default);\n", stack_ti.name);
+		}
+		return builder_to_string(*sb);
+	}
+}
+
 Widget :: struct {
 	pref_size: [#run enum_values_as_s64(Axies).count]Widget_Size;
 	child_dir: Axies;
@@ -75,7 +132,7 @@ Ctx :: struct {
 	entities: [..]Entities;
 	widget_root: *Widget;
 	widgets: [..]*Widget;
-	seed_stack: [..]u64;
+	stacks: Widget_Stacks;
 	frame_index: s64;
 }
 
@@ -106,25 +163,6 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float32, y: float32, 
 		h = texture.h * scale,
 	};
 	SDL_RenderTexture(renderer, texture, null, *dstrect);
-}
-
-get_top_seed :: (using ctx: *Ctx) -> u64 {
-	if seed_stack.count > 0 {
-		return pop(*seed_stack);
-	}
-	return 0;
-}
-
-get_top_pref_width :: (using ctx: *Ctx) -> Widget_Size {
-	return .{property = .Pixels, value = 250.0};
-}
-
-get_top_pref_height :: (using ctx: *Ctx) -> Widget_Size {
-	return .{property = .Pixels, value = 50.0};
-}
-
-get_top_parent :: (using ctx: *Ctx) -> *Widget {
-	return ctx.widget_root;
 }
 
 key_from_string :: (seed: u64, str: string) -> u64 {
@@ -184,7 +222,7 @@ append_to_parent :: (parent: *Widget, widget: *Widget) {
 }
 
 init_widget_by_key :: (using ctx: *Ctx, key: u64, flags: Widget_Flags) -> *Widget {
-	parent := get_top_parent(ctx);
+	parent := stack_peek(stacks.parents);
 	widget := get_widget_by_key(ctx, key);
 	if is_null_widget(widget) {
 		widget = alloc(size_of(Widget));
@@ -196,16 +234,17 @@ init_widget_by_key :: (using ctx: *Ctx, key: u64, flags: Widget_Flags) -> *Widge
 	widget.font_size = 24;
 	widget.text_color = top_text_color();
 	widget.flags = flags;
-	widget.pref_size[Axies.X] = get_top_pref_width(ctx);
-	widget.pref_size[Axies.Y] = get_top_pref_height(ctx);
+	widget.pref_size[Axies.X] = stack_peek(stacks.pref_width);
+	widget.pref_size[Axies.Y] = stack_peek(stacks.pref_height);
 	widget.first = *null_widget;
 	widget.last = *null_widget;
+	pop_unused(*ctx.stacks);
 	append_to_parent(parent, widget);
 	return widget;
 }
 
 init_widget_by_string :: (using ctx: *Ctx, str: string, flags: Widget_Flags) -> *Widget {
-	seed := get_top_seed(ctx);
+	seed := stack_peek(stacks.seed);
 	key := key_from_string(seed, str);
 	widget := init_widget_by_key(ctx, key, flags);
 	if flags & .Draw_Text {
@@ -248,16 +287,26 @@ draw_widget :: (using ctx: *Ctx, widget: *Widget) {
 	}
 }
 
+debug_widget :: (using ctx: *Ctx, widget: *Widget, x := 300.0, y := 0.0) -> y: float32 {
+	draw_text(renderer, font, x, y, tprint("rect at %", widget.rect));
+	y += 24;
+	child := widget.first;
+	while!is_null_widget(child) {
+		y = debug_widget(ctx, child, x + 24, y);
+		child = child.next;
+	}
+	return y;
+}
+
 render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
 	widget := ctx.widget_root;
+	debug_widget(ctx, widget);
 	while !is_null_widget(widget) {
 		draw_widget(ctx, widget);
 		widget = iterate_children(ctx.widget_root, widget);
 	}
-	draw_text(renderer, font, 300, 48, tprint("number of widgets in heap = %", widgets.count));
-	draw_text(renderer, font, 300, 72, tprint("allocated widgets in heap = %", widgets.allocated)); 
 	SDL_RenderPresent(renderer);
 }
 
@@ -333,17 +382,21 @@ calculate_layout_standalone :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 }
 
 calculate_layout_position :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
-	position: float32 = 0.0;
 	widget := root;
 	while !is_null_widget(widget) {
+		position: float32 = 0.0;
+		bound: float32 = 0.0;
 		child := widget.first;
 		while !is_null_widget(child) {
 			if widget.layout_dir == dir {
 				set_dir_pos(*child.rect, dir, position);
 				position += get_dir_size(*child.rect, dir);
+			} else {
+				bound = max(bound, get_dir_size(*child.rect, dir));
 			}
 			child = child.next;
 		}
+		set_dir_size(*widget.rect, dir, max(bound, get_dir_size(*widget.rect, dir)));
 		widget = iterate_children(root, widget);
 	}
 }
@@ -364,6 +417,27 @@ prune_entities :: (using ctx: *Ctx) {
 		} else {
 			iter += 1;
 		}
+	}
+}
+
+gui_panel_begin :: (using ctx: *Ctx, name: string) -> *Widget {
+	widget := init_widget_by_string(ctx, name, .Draw_Border | .Draw_Background);
+	stack_push(*stacks.parents, widget);
+	return widget;
+}
+
+gui_panel_end :: (using ctx: *Ctx) -> Widget_Signal {
+	widget := stack_pop(*stacks.parents);
+	return widget.frame_signal;
+}
+
+debug_print_tree :: (using ctx: *Ctx, tree: *Widget, spaces := 0) {
+	for 0..spaces print(" ");
+	print("widget % (at %): %\n", tree.key, tree, tree.parent);
+	child := tree.first;
+	while !is_null_widget(child) {
+		debug_print_tree(ctx, child, spaces + 2);
+		child = child.next;
 	}
 }
 
@@ -399,11 +473,15 @@ main :: () {
 				handle_click(*ctx, .{event.mouse.x, event.mouse.y}, buttons);
 			}
 		}
+		init_stacks(*stacks);
+		stack_push(*stacks.parents, ctx.widget_root);
+		panel := gui_panel_begin(*ctx, "buttons");
 		gui_label(*ctx, "test % % %", 1, 2, 3);
 		gui_label(*ctx, "test2");
 		if gui_button(*ctx, "add entity").clicked & .LEFT {
 			array_add(*entities, .{time = current_frame_time});
 		}
+		gui_panel_end(*ctx);
 		for * entity: entities {
 			if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT {
 				entity.should_delete = true;

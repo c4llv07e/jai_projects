@@ -8,6 +8,24 @@ Widget_Flags :: enum_flags u32 {
 	Hot_Effect;
 }
 
+Widget_Size_Property :: enum u8 {
+	None :: 0;
+	Pixels;
+	Content;
+	Percent;
+	Shrink; // to sum of children
+}
+
+Widget_Size :: struct {
+	property: Widget_Size_Property;
+	value: float32;
+}
+
+Axies :: enum u8 {
+	X;
+	Y;
+}
+
 Mouse_Buttons_State :: enum_flags u8 {
 	LEFT;
 	RIGHT;
@@ -22,6 +40,8 @@ Widget_Signal :: struct {
 }
 
 Widget :: struct {
+	pref_size: [#run enum_values_as_s64(Axies).count]Widget_Size;
+	child_dir: Axies;
 	font: *TTF_Font; // TODO(c4llv07e): Maybe it should point on persistent storage and not directly on font.
 	flags: Widget_Flags;
 	key: u64;
@@ -33,6 +53,8 @@ Widget :: struct {
 	font_size: float32;
 	frame_signal: Widget_Signal;
 	last_frame_index: s64;
+	next, prev, first, last, parent: *Widget;
+	layout_dir: Axies = .Y;
 }
 null_widget: Widget;
 
@@ -51,8 +73,8 @@ Ctx :: struct {
 	current_frame_time: u64;
 	keymod_state: SDL_Keymod;
 	entities: [..]Entities;
+	widget_root: *Widget;
 	widgets: [..]*Widget;
-	widget_stack: [..]*Widget;
 	seed_stack: [..]u64;
 	frame_index: s64;
 }
@@ -93,6 +115,18 @@ get_top_seed :: (using ctx: *Ctx) -> u64 {
 	return 0;
 }
 
+get_top_pref_width :: (using ctx: *Ctx) -> Widget_Size {
+	return .{property = .Pixels, value = 250.0};
+}
+
+get_top_pref_height :: (using ctx: *Ctx) -> Widget_Size {
+	return .{property = .Pixels, value = 50.0};
+}
+
+get_top_parent :: (using ctx: *Ctx) -> *Widget {
+	return ctx.widget_root;
+}
+
 key_from_string :: (seed: u64, str: string) -> u64 {
 	// TODO(c4llv07e): I am just learning, but this seed could be problematic in the future.
 	return seed + djb2_hash(str);
@@ -103,7 +137,7 @@ top_text_color :: () -> SDL_Color {
 }
 
 is_null_widget :: (widget: *Widget) -> bool {
-	return (widget == *null_widget) || (widget.key == 0);
+	return (widget == *null_widget) || (widget == null);
 }
 
 get_widget_by_key :: (using ctx: *Ctx, key: u64) -> *Widget {
@@ -120,19 +154,53 @@ add_and_peek :: (array: *[..] $T, item: T) -> *T {
 	return peek_pointer(array.*);
 }
 
+iterate_children :: (root: *Widget, widget: *Widget) -> next: *Widget {
+	if !is_null_widget(widget.first) {
+		return widget.first;
+	}
+	while !is_null_widget(widget) && widget != root {
+		if !is_null_widget(widget.next) {
+			return widget.next;
+		}
+		widget = widget.parent;
+	}
+	return *null_widget;
+}
+
+append_to_parent :: (parent: *Widget, widget: *Widget) {
+	widget.parent = parent;
+	if is_null_widget(parent.last) {
+		assert(is_null_widget(parent.first), "Parent doesn't have last child but have first.");
+		parent.first = widget;
+		parent.last = widget;
+		widget.next = *null_widget;
+		widget.prev = *null_widget;
+	} else {
+		parent.last.next = widget;
+		widget.prev = parent.last;
+		widget.next = *null_widget;
+		parent.last = widget;
+	}
+}
+
 init_widget_by_key :: (using ctx: *Ctx, key: u64, flags: Widget_Flags) -> *Widget {
+	parent := get_top_parent(ctx);
 	widget := get_widget_by_key(ctx, key);
 	if is_null_widget(widget) {
 		widget = alloc(size_of(Widget));
-		widget.key = key;
 		array_add(*widgets, widget);
 	}
+	widget.key = key;
 	widget.last_frame_index = frame_index;
 	widget.font = font;
 	widget.font_size = 24;
 	widget.text_color = top_text_color();
 	widget.flags = flags;
-	array_add(*ctx.widget_stack, widget);
+	widget.pref_size[Axies.X] = get_top_pref_width(ctx);
+	widget.pref_size[Axies.Y] = get_top_pref_height(ctx);
+	widget.first = *null_widget;
+	widget.last = *null_widget;
+	append_to_parent(parent, widget);
 	return widget;
 }
 
@@ -166,24 +234,28 @@ gui_button :: (using ctx: *Ctx, text: string) -> Widget_Signal {
 	return widget.frame_signal;
 }
 
+draw_widget :: (using ctx: *Ctx, widget: *Widget) {
+	if widget.flags & .Draw_Background {
+		sdl_set_color(renderer, widget.background_color);
+		SDL_RenderFillRect(renderer, *widget.rect);
+	}
+	if widget.flags & .Draw_Border {
+		sdl_set_color(renderer, widget.border_color);
+		SDL_RenderRect(renderer, *widget.rect);
+	}
+	if widget.flags & .Draw_Text {
+		draw_text(renderer, widget.font, widget.x, widget.y, widget.text, widget.text_color);
+	}
+}
+
 render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
-	for widget: widget_stack {
-		if widget.flags & .Draw_Background {
-			sdl_set_color(renderer, widget.background_color);
-			SDL_RenderFillRect(renderer, *widget.rect);
-		}
-		if widget.flags & .Draw_Border {
-			sdl_set_color(renderer, widget.border_color);
-			SDL_RenderRect(renderer, *widget.rect);
-		}
-		if widget.flags & .Draw_Text {
-			draw_text(renderer, widget.font, widget.x, widget.y, widget.text, widget.text_color);
-		}
+	widget := ctx.widget_root;
+	while !is_null_widget(widget) {
+		draw_widget(ctx, widget);
+		widget = iterate_children(ctx.widget_root, widget);
 	}
-	draw_text(renderer, font, 300, 0, tprint("number of widgets in stack = %", widget_stack.count));
-	draw_text(renderer, font, 300, 24, tprint("allocated widgets in stack = %", widget_stack.allocated));
 	draw_text(renderer, font, 300, 48, tprint("number of widgets in heap = %", widgets.count));
 	draw_text(renderer, font, 300, 72, tprint("allocated widgets in heap = %", widgets.allocated)); 
 	SDL_RenderPresent(renderer);
@@ -212,10 +284,73 @@ prune_old_widgets :: (using ctx: *Ctx) {
 	frame_index += 1;
 }
 
-calculate_layout :: (using ctx: *Ctx) {
-	for widget, widget_index: widget_stack {
-		widget.y = xx (widget_index * 26);
+get_dir_properties :: (rect: *SDL_FRect, dir: Axies) -> pos: *float32, size: *float32 #expand {
+	assert(dir == .X || dir == .Y);
+	if dir == .X {
+		return *rect.x, *rect.w;
 	}
+	return *rect.y, *rect.h;
+}
+
+set_dir_pos :: inline (rect: *SDL_FRect, dir: Axies, val: float32) #expand {
+	assert(dir == .X || dir == .Y);
+	if dir == .X {
+		rect.x = val;
+	} else {
+		rect.y = val;
+	}
+}
+
+set_dir_size :: inline (rect: *SDL_FRect, dir: Axies, val: float32) #expand {
+	assert(dir == .X || dir == .Y);
+	if dir == .X {
+		rect.w = val;
+	} else {
+		rect.h = val;
+	}
+}
+
+get_dir_size :: inline (rect: *SDL_FRect, dir: Axies) -> float32 #expand {
+	assert(dir == .X || dir == .Y);
+	if dir == .X {
+		return rect.w;
+	}
+	return rect.h;
+}
+
+calculate_layout_standalone :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
+	widget := root;
+	while !is_null_widget(widget) {
+		if widget.pref_size[dir].property == {
+			case .Pixels;
+			set_dir_size(*widget.rect, dir, widget.pref_size[dir].value);
+			case .Content;
+			log("Content layout size not implemented yet!");
+			exit(-1);
+		}
+		widget = iterate_children(root, widget);
+	}
+}
+
+calculate_layout_position :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
+	position: float32 = 0.0;
+	widget := root;
+	while !is_null_widget(widget) {
+		child := widget.first;
+		while !is_null_widget(child) {
+			if widget.layout_dir == dir {
+				set_dir_pos(*child.rect, dir, position);
+				position += get_dir_size(*child.rect, dir);
+			}
+			child = child.next;
+		}
+		widget = iterate_children(root, widget);
+	}
+}
+
+calculate_layout :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
+	calculate_layout_standalone(ctx, root, dir);
+	calculate_layout_position(ctx, root, dir);
 }
 
 prune_entities :: (using ctx: *Ctx) {
@@ -235,6 +370,8 @@ prune_entities :: (using ctx: *Ctx) {
 main :: () {
 	using ctx := Ctx.{
 	};
+	_root: Widget;
+	ctx.widget_root = *_root;
 	initial_width :: 800;
 	initial_height :: 600;
 	check_sdl(SDL_Init(.VIDEO), "Can't init SDL");
@@ -265,7 +402,6 @@ main :: () {
 		gui_label(*ctx, "test % % %", 1, 2, 3);
 		gui_label(*ctx, "test2");
 		if gui_button(*ctx, "add entity").clicked & .LEFT {
-			log("Added entity at %", current_frame_time);
 			array_add(*entities, .{time = current_frame_time});
 		}
 		for * entity: entities {
@@ -274,9 +410,10 @@ main :: () {
 			}
 		}
 		prune_entities(*ctx);
-		calculate_layout(*ctx);
+		for dir: enum_values_as_s64(Axies) {
+			calculate_layout(*ctx, ctx.widget_root, cast(Axies)dir);
+		}
 		render(*ctx);
-		widget_stack.count = 0;
 		reset_temporary_storage();
 	}
 }

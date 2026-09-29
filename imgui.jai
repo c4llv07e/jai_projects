@@ -417,6 +417,7 @@ calculate_layout_upwards :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 					fixed_parent = parent;
 				}
 				parent = parent.parent;
+				break;
 			}
 			set_dir_size(*widget.rect, dir, get_dir_size(*fixed_parent.rect, dir) * widget.pref_size[dir].value);
 		}

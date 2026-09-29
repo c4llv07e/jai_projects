@@ -59,7 +59,7 @@ stack_peek :: (stack: Stack) -> stack.element_type {
 
 stack_set_next :: (stack: *Stack, value: stack.element_type) {
 	assert(!stack.pop_next, "Trying to put multiple values for next element!");
-	stack_push(*stack.array, value);
+	stack_push(stack, value);
 	stack.pop_next = true;
 }
 
@@ -68,6 +68,10 @@ Widget_Stacks :: struct {
 	seed: Stack(u64, 123);
 	pref_width: Stack(Widget_Size, .{property = .Pixels, value = 250.0});
 	pref_height: Stack(Widget_Size, .{property = .Pixels, value = 50.0});
+	text_color: Stack(SDL_Color, .{0xe3, 0xe3, 0xe3, 0xff});
+	background_color: Stack(SDL_Color, .{0x00, 0x00, 0x00, 0xff});
+	border_color: Stack(SDL_Color, .{0x00, 0x00, 0x00, 0xff});
+	layout_dir: Stack(Axies, .X);
 }
 
 pop_unused :: (stacks: *Widget_Stacks) {
@@ -90,6 +94,7 @@ init_stacks :: (stacks: *Widget_Stacks) {
 		for stack_ti: ti.members {
 			if stack_ti.type.type != .STRUCT continue;
 			stack_struct_ti := cast(*Type_Info_Struct)stack_ti.type;
+			print_to_builder(*sb, "array_reset(*stacks.%1.array);\n", stack_ti.name);
 			print_to_builder(*sb, "stack_push(*stacks.%1, stacks.%1.default);\n", stack_ti.name);
 		}
 		return builder_to_string(*sb);
@@ -111,7 +116,7 @@ Widget :: struct {
 	frame_signal: Widget_Signal;
 	last_frame_index: s64;
 	next, prev, first, last, parent: *Widget;
-	layout_dir: Axies = .Y;
+	layout_dir: Axies;
 }
 null_widget: Widget;
 
@@ -168,10 +173,6 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float32, y: float32, 
 key_from_string :: (seed: u64, str: string) -> u64 {
 	// TODO(c4llv07e): I am just learning, but this seed could be problematic in the future.
 	return seed + djb2_hash(str);
-}
-
-top_text_color :: () -> SDL_Color {
-	return .{0xe3, 0xe3, 0xe3, 0xff};
 }
 
 is_null_widget :: (widget: *Widget) -> bool {
@@ -232,12 +233,15 @@ init_widget_by_key :: (using ctx: *Ctx, key: u64, flags: Widget_Flags) -> *Widge
 	widget.last_frame_index = frame_index;
 	widget.font = font;
 	widget.font_size = 24;
-	widget.text_color = top_text_color();
+	widget.text_color = stack_peek(stacks.text_color);
+	widget.background_color = stack_peek(stacks.background_color);
+	widget.border_color = stack_peek(stacks.border_color);
 	widget.flags = flags;
 	widget.pref_size[Axies.X] = stack_peek(stacks.pref_width);
 	widget.pref_size[Axies.Y] = stack_peek(stacks.pref_height);
 	widget.first = *null_widget;
 	widget.last = *null_widget;
+	widget.layout_dir = stack_peek(stacks.layout_dir);
 	pop_unused(*ctx.stacks);
 	append_to_parent(parent, widget);
 	return widget;
@@ -302,11 +306,11 @@ render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
 	widget := ctx.widget_root;
-	debug_widget(ctx, widget);
 	while !is_null_widget(widget) {
 		draw_widget(ctx, widget);
 		widget = iterate_children(ctx.widget_root, widget);
 	}
+	debug_widget(ctx, ctx.widget_root, y = 40.0);
 	SDL_RenderPresent(renderer);
 }
 
@@ -381,6 +385,27 @@ calculate_layout_standalone :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 	}
 }
 
+calculate_layout_upwards :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
+	widget := root;
+	while !is_null_widget(widget) {
+		if widget.pref_size[dir].property == {
+			case .Percent;
+			fixed_parent := *null_widget;
+			parent := widget.parent;
+			while !is_null_widget(parent) {
+				if (parent.pref_size[dir].property == .Pixels ||
+				    parent.pref_size[dir].property == .Percent ||
+				    parent.pref_size[dir].property == .Content) {
+					fixed_parent = parent;
+				}
+				parent = parent.parent;
+			}
+			set_dir_size(*widget.rect, dir, get_dir_size(*fixed_parent.rect, dir) * widget.pref_size[dir].value);
+		}
+		widget = iterate_children(root, widget);
+	}
+}
+
 calculate_layout_position :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 	widget := root;
 	while !is_null_widget(widget) {
@@ -403,6 +428,7 @@ calculate_layout_position :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 
 calculate_layout :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 	calculate_layout_standalone(ctx, root, dir);
+	calculate_layout_upwards(ctx, root, dir);
 	calculate_layout_position(ctx, root, dir);
 }
 
@@ -474,7 +500,17 @@ main :: () {
 			}
 		}
 		init_stacks(*stacks);
+		window_width: s32;
+		window_height: s32;
+		SDL_GetWindowSizeInPixels(window, *window_width, *window_height);
+		stack_set_next(*stacks.pref_width, .{property = .Pixels, value = xx window_width});
+		stack_set_next(*stacks.pref_height, .{property = .Pixels, value = xx window_height});
+		stack_set_next(*stacks.layout_dir, .Y);
+		stack_set_next(*stacks.background_color, .{0x00, 0xff, 0x00, 0xff});
+		ctx.widget_root = init_widget_by_string(*ctx, tprint("id = %", ctx.frame_index), .Draw_Background);
 		stack_push(*stacks.parents, ctx.widget_root);
+		stack_set_next(*stacks.pref_width, .{property = .Percent, value = 1.0});
+		stack_set_next(*stacks.background_color, .{0xff, 0x00, 0x00, 0xff});
 		panel := gui_panel_begin(*ctx, "buttons");
 		gui_label(*ctx, "test % % %", 1, 2, 3);
 		gui_label(*ctx, "test2");
@@ -482,11 +518,14 @@ main :: () {
 			array_add(*entities, .{time = current_frame_time});
 		}
 		gui_panel_end(*ctx);
+		stack_push(*stacks.text_color, .{0xff, 0x00, 0x00, 0xff});
 		for * entity: entities {
 			if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT {
 				entity.should_delete = true;
 			}
 		}
+		stack_pop(*stacks.text_color);
+		stack_pop(*stacks.parents);
 		prune_entities(*ctx);
 		for dir: enum_values_as_s64(Axies) {
 			calculate_layout(*ctx, ctx.widget_root, cast(Axies)dir);

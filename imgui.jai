@@ -302,14 +302,18 @@ debug_widget :: (using ctx: *Ctx, widget: *Widget, x := 300.0, y := 0.0) -> y: f
 	return y;
 }
 
-render :: (using ctx: *Ctx) {
-	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
-	SDL_RenderClear(renderer);
+gui_render :: (using ctx: *Ctx) {
 	widget := ctx.widget_root;
 	while !is_null_widget(widget) {
 		draw_widget(ctx, widget);
 		widget = iterate_children(ctx.widget_root, widget);
 	}
+}
+
+render :: (using ctx: *Ctx) {
+	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
+	SDL_RenderClear(renderer);
+	gui_render(ctx);
 	debug_widget(ctx, ctx.widget_root, y = 40.0);
 	SDL_RenderPresent(renderer);
 }
@@ -467,11 +471,31 @@ debug_print_tree :: (using ctx: *Ctx, tree: *Widget, spaces := 0) {
 	}
 }
 
+gui_begin :: (using ctx: *Ctx) {
+	prune_old_widgets(ctx); // TODO(c4llv07e): I can't even be sure if I need to prune widgets anymore. But I don't want to check it for now.
+	init_stacks(*stacks);
+	window_width: s32;
+	window_height: s32;
+	SDL_GetWindowSizeInPixels(window, *window_width, *window_height);
+	stack_set_next(*stacks.pref_width, .{property = .Pixels, value = xx window_width});
+	stack_set_next(*stacks.pref_height, .{property = .Pixels, value = xx window_height});
+	stack_set_next(*stacks.layout_dir, .Y);
+	stack_set_next(*stacks.background_color, .{0x00, 0xff, 0x00, 0xff});
+	ctx.widget_root = init_widget_by_string(ctx, tprint("id = %", ctx.frame_index), .Draw_Background);
+	stack_push(*stacks.parents, ctx.widget_root);
+}
+
+gui_end :: (using ctx: *Ctx) {
+	stack_pop(*stacks.parents);
+	for dir: enum_values_as_s64(Axies) {
+		calculate_layout(ctx, ctx.widget_root, cast(Axies)dir);
+	}
+	widget_reset_frame_signal(ctx);
+}
+
 main :: () {
 	using ctx := Ctx.{
 	};
-	_root: Widget;
-	ctx.widget_root = *_root;
 	initial_width :: 800;
 	initial_height :: 600;
 	check_sdl(SDL_Init(.VIDEO), "Can't init SDL");
@@ -487,8 +511,6 @@ main :: () {
 		deltatime = (current_frame_time - previous_frame_time) / 1000.0;
 		previous_frame_time = current_frame_time;
 		keymod_state = SDL_GetModState();
-		widget_reset_frame_signal(*ctx);
-		prune_old_widgets(*ctx);
 		while SDL_PollEvent(*event) {
 			if event.type == {
 				case .QUIT;
@@ -499,37 +521,27 @@ main :: () {
 				handle_click(*ctx, .{event.mouse.x, event.mouse.y}, buttons);
 			}
 		}
-		init_stacks(*stacks);
-		window_width: s32;
-		window_height: s32;
-		SDL_GetWindowSizeInPixels(window, *window_width, *window_height);
-		stack_set_next(*stacks.pref_width, .{property = .Pixels, value = xx window_width});
-		stack_set_next(*stacks.pref_height, .{property = .Pixels, value = xx window_height});
-		stack_set_next(*stacks.layout_dir, .Y);
-		stack_set_next(*stacks.background_color, .{0x00, 0xff, 0x00, 0xff});
-		ctx.widget_root = init_widget_by_string(*ctx, tprint("id = %", ctx.frame_index), .Draw_Background);
-		stack_push(*stacks.parents, ctx.widget_root);
-		stack_set_next(*stacks.pref_width, .{property = .Percent, value = 1.0});
-		stack_set_next(*stacks.background_color, .{0xff, 0x00, 0x00, 0xff});
-		panel := gui_panel_begin(*ctx, "buttons");
-		gui_label(*ctx, "test % % %", 1, 2, 3);
-		gui_label(*ctx, "test2");
-		if gui_button(*ctx, "add entity").clicked & .LEFT {
-			array_add(*entities, .{time = current_frame_time});
-		}
-		gui_panel_end(*ctx);
-		stack_push(*stacks.text_color, .{0xff, 0x00, 0x00, 0xff});
-		for * entity: entities {
-			if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT {
-				entity.should_delete = true;
+		gui_begin(*ctx);
+		{
+			stack_set_next(*stacks.pref_width, .{property = .Percent, value = 1.0});
+			stack_set_next(*stacks.background_color, .{0xff, 0x00, 0x00, 0xff});
+			panel := gui_panel_begin(*ctx, "buttons");
+			gui_label(*ctx, "test % % %", 1, 2, 3);
+			gui_label(*ctx, "test2");
+			if gui_button(*ctx, "add entity").clicked & .LEFT {
+				array_add(*entities, .{time = current_frame_time});
 			}
+			gui_panel_end(*ctx);
+			stack_push(*stacks.text_color, .{0xff, 0x00, 0x00, 0xff});
+			for * entity: entities {
+				if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT {
+					entity.should_delete = true;
+				}
+			}
+			stack_pop(*stacks.text_color);
+			prune_entities(*ctx);
 		}
-		stack_pop(*stacks.text_color);
-		stack_pop(*stacks.parents);
-		prune_entities(*ctx);
-		for dir: enum_values_as_s64(Axies) {
-			calculate_layout(*ctx, ctx.widget_root, cast(Axies)dir);
-		}
+		gui_end(*ctx);
 		render(*ctx);
 		reset_temporary_storage();
 	}

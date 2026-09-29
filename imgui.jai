@@ -69,8 +69,8 @@ Widget_Stacks :: struct {
 	pref_width: Stack(Widget_Size, .{property = .Pixels, value = 250.0});
 	pref_height: Stack(Widget_Size, .{property = .Pixels, value = 50.0});
 	text_color: Stack(SDL_Color, .{0xe3, 0xe3, 0xe3, 0xff});
-	background_color: Stack(SDL_Color, .{0x00, 0x00, 0x00, 0xff});
-	border_color: Stack(SDL_Color, .{0x00, 0x00, 0x00, 0xff});
+	background_color: Stack(SDL_Color, .{0x00, 0x00, 0x00, 0x00});
+	border_color: Stack(SDL_Color, .{0x00, 0x00, 0x00, 0x00});
 	layout_dir: Stack(Axies, .X);
 }
 
@@ -172,6 +172,7 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float32, y: float32, 
 
 key_from_string :: (seed: u64, str: string) -> u64 {
 	// TODO(c4llv07e): I am just learning, but this seed could be problematic in the future.
+	// Update: Works fine, because we don't use hash table. Fix when hash table arrives.
 	return seed + djb2_hash(str);
 }
 
@@ -278,11 +279,11 @@ gui_button :: (using ctx: *Ctx, text: string) -> Widget_Signal {
 }
 
 draw_widget :: (using ctx: *Ctx, widget: *Widget) {
-	if widget.flags & .Draw_Background {
+	if widget.flags & .Draw_Background && widget.background_color.a > 0 {
 		sdl_set_color(renderer, widget.background_color);
 		SDL_RenderFillRect(renderer, *widget.rect);
 	}
-	if widget.flags & .Draw_Border {
+	if widget.flags & .Draw_Border && widget.border_color.a > 0 {
 		sdl_set_color(renderer, widget.border_color);
 		SDL_RenderRect(renderer, *widget.rect);
 	}
@@ -358,6 +359,14 @@ set_dir_pos :: inline (rect: *SDL_FRect, dir: Axies, val: float32) #expand {
 	}
 }
 
+get_dir_pos :: inline (rect: *SDL_FRect, dir: Axies) -> float32 #expand {
+	assert(dir == .X || dir == .Y);
+	if dir == .X {
+		return rect.x;
+	}
+	return rect.y;
+}
+
 set_dir_size :: inline (rect: *SDL_FRect, dir: Axies, val: float32) #expand {
 	assert(dir == .X || dir == .Y);
 	if dir == .X {
@@ -382,8 +391,13 @@ calculate_layout_standalone :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 			case .Pixels;
 			set_dir_size(*widget.rect, dir, widget.pref_size[dir].value);
 			case .Content;
-			log("Content layout size not implemented yet!");
-			exit(-1);
+			if dir == .X {
+				ok, width := sdl_measure_string(widget.font, widget.text);
+				widget.rect.w = width + widget.pref_size[Axies.X].value;
+			} else {
+				height := TTF_GetFontHeight(font);
+				widget.rect.h = xx height;
+			}
 		}
 		widget = iterate_children(root, widget);
 	}
@@ -410,6 +424,33 @@ calculate_layout_upwards :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 	}
 }
 
+calculate_layout_downwards :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
+	widget := root.first;
+	while !is_null_widget(widget) {
+		calculate_layout_downwards(ctx, widget, dir);
+		widget = widget.next;
+	}
+	if root.pref_size[dir].property == .Shrink {
+		if dir == root.layout_dir {
+			sum_size: float32 = 0.0;
+			widget = root.first;
+			while !is_null_widget(widget) {
+				sum_size += get_dir_size(*widget.rect, dir);
+				widget = widget.next;
+			}
+			set_dir_size(*root.rect, dir, sum_size);
+		} else {
+			max_size: float32 = 0.0;
+			widget = root.first;
+			while !is_null_widget(widget) {
+				max_size = max(get_dir_size(*widget.rect, dir), max_size);
+				widget = widget.next;
+			}
+			set_dir_size(*root.rect, dir, max_size);
+		}
+	}
+}
+
 calculate_layout_position :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 	widget := root;
 	while !is_null_widget(widget) {
@@ -418,7 +459,7 @@ calculate_layout_position :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 		child := widget.first;
 		while !is_null_widget(child) {
 			if widget.layout_dir == dir {
-				set_dir_pos(*child.rect, dir, position);
+				set_dir_pos(*child.rect, dir, get_dir_pos(*widget.rect, dir) + position);
 				position += get_dir_size(*child.rect, dir);
 			} else {
 				bound = max(bound, get_dir_size(*child.rect, dir));
@@ -433,6 +474,7 @@ calculate_layout_position :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 calculate_layout :: (using ctx: *Ctx, root: *Widget, dir: Axies) {
 	calculate_layout_standalone(ctx, root, dir);
 	calculate_layout_upwards(ctx, root, dir);
+	calculate_layout_downwards(ctx, root, dir);
 	calculate_layout_position(ctx, root, dir);
 }
 
@@ -480,8 +522,7 @@ gui_begin :: (using ctx: *Ctx) {
 	stack_set_next(*stacks.pref_width, .{property = .Pixels, value = xx window_width});
 	stack_set_next(*stacks.pref_height, .{property = .Pixels, value = xx window_height});
 	stack_set_next(*stacks.layout_dir, .Y);
-	stack_set_next(*stacks.background_color, .{0x00, 0xff, 0x00, 0xff});
-	ctx.widget_root = init_widget_by_string(ctx, tprint("id = %", ctx.frame_index), .Draw_Background);
+	ctx.widget_root = init_widget_by_string(ctx, tprint("id = %", ctx.frame_index), 0);
 	stack_push(*stacks.parents, ctx.widget_root);
 }
 
@@ -525,20 +566,36 @@ main :: () {
 		{
 			stack_set_next(*stacks.pref_width, .{property = .Percent, value = 1.0});
 			stack_set_next(*stacks.background_color, .{0xff, 0x00, 0x00, 0xff});
-			panel := gui_panel_begin(*ctx, "buttons");
-			gui_label(*ctx, "test % % %", 1, 2, 3);
-			gui_label(*ctx, "test2");
-			if gui_button(*ctx, "add entity").clicked & .LEFT {
-				array_add(*entities, .{time = current_frame_time});
-			}
-			gui_panel_end(*ctx);
-			stack_push(*stacks.text_color, .{0xff, 0x00, 0x00, 0xff});
-			for * entity: entities {
-				if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT {
-					entity.should_delete = true;
+			gui_panel_begin(*ctx, "buttons");
+			{
+				gui_label(*ctx, "test % % %", 1, 2, 3);
+				gui_label(*ctx, "test2");
+				if gui_button(*ctx, "add entity").clicked & .LEFT {
+					array_add(*entities, .{time = current_frame_time});
 				}
 			}
-			stack_pop(*stacks.text_color);
+			gui_panel_end(*ctx);
+			stack_set_next(*stacks.layout_dir, .Y);
+			stack_set_next(*stacks.background_color, .{0x00, 0x00, 0xff, 0xff});
+			stack_set_next(*stacks.pref_height, .{property = .Shrink});
+			stack_set_next(*stacks.pref_width, .{property = .Shrink});
+			gui_panel_begin(*ctx, "entities");
+			{
+				stack_push(*stacks.text_color, .{0xff, 0x00, 0x00, 0xff});
+				stack_push(*stacks.pref_width, .{property = .Content, value = 12});
+				stack_push(*stacks.pref_height, .{property = .Content, value = 0});
+				stack_push(*stacks.border_color, .{0xff, 0xff, 0x00, 0xff});
+				for * entity: entities {
+					if gui_button(*ctx, tprint("entity-%", entity.time)).clicked & .LEFT {
+						entity.should_delete = true;
+					}
+				}
+				stack_pop(*stacks.border_color);
+				stack_pop(*stacks.pref_height);
+				stack_pop(*stacks.pref_width);
+				stack_pop(*stacks.text_color);
+			}
+			gui_panel_end(*ctx);
 			prune_entities(*ctx);
 		}
 		gui_end(*ctx);

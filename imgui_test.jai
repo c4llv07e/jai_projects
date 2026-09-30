@@ -105,6 +105,7 @@ main :: () {
 	SDL_SetRenderVSync(renderer, 1);
 	event: SDL_Event;
 	window_state: Window_State;
+	SDL_GetWindowSizeInPixels(window, *window_state.width, *window_state.height);
 	previous_frame_time = SDL_GetTicks();
 	while main_loop := true {
 		current_frame_time := SDL_GetTicks();
@@ -119,9 +120,11 @@ main :: () {
 				buttons: Mouse_Buttons_State;
 				if event.mouse.button == .LEFT then buttons |= .LEFT;
 				handle_click(*gui_state, .{event.mouse.x, event.mouse.y}, buttons);
+				case .WINDOW_RESIZED;
+				window_state.width = event.window.data1;
+				window_state.height = event.window.data2;
 			}
 		}
-		SDL_GetWindowSizeInPixels(window, *window_state.width, *window_state.height);
 		gui_begin(*gui_state, window_state);
 		{
 			// TODO(c4llv07e): gui_state.stacks.<stack_name> is too long, we need helper functions like set_next_pref_width or something;
@@ -156,6 +159,11 @@ main :: () {
 				stack_pop(*gui_state.stacks.pref_height);
 				stack_pop(*gui_state.stacks.pref_width);
 				stack_pop(*gui_state.stacks.text_color);
+			}
+			gui_panel_end(*gui_state);
+			gui_panel_begin(*gui_state, "floating");
+			{
+				gui_label(*gui_state, "we are floating...");
 			}
 			gui_panel_end(*gui_state);
 			prune_entities(*ctx);

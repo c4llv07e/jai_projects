@@ -400,6 +400,7 @@ calculate_layout_position :: (using gui_state: *Gui_State, root: *Widget, dir: A
 				child.rect.pos[dir] = widget.rect.pos[dir] + position;
 				position += child.rect.size[dir];
 			} else {
+				child.rect.pos[dir] = widget.rect.pos[dir];
 				bound = max(bound, child.rect.size[dir]);
 			}
 			child = child.next;

@@ -133,6 +133,7 @@ main :: () {
 		{
 			// TODO(c4llv07e): gui_state.stacks.<stack_name> is too long, we need helper functions like set_next_pref_width or something;
 			stack_push(*gui_state.stacks.font, font);
+			stack_push(*gui_state.stacks.font_size, 16.0);
 			stack_set_next(*gui_state.stacks.pref_width, .{property = .Percent, value = 1.0});
 			stack_set_next(*gui_state.stacks.background_color, .{0x80, 0x00, 0x00, 0xff});
 			gui_panel_begin(*gui_state, "buttons");
@@ -177,6 +178,7 @@ main :: () {
 			gui_panel_end(*gui_state);
 			gui_label(*gui_state, "end");
 			prune_entities(*ctx);
+			stack_pop(*gui_state.stacks.font_size);
 			stack_pop(*gui_state.stacks.font);
 		}
 		gui_end(*gui_state);

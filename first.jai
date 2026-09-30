@@ -1,13 +1,6 @@
 WIN_BUILD_ENABLED :: true;
 
 configure_options :: (options: *Build_Options) {
-	options.output_executable_name = "imgui";
-	options.use_visual_studio_message_format = true; // Thanks, 4coder
-	options.text_output_flags = 0; // I don't need timings much, and I would rather see more code or more errors in *compilation* window.
-}
-
-run_compilation :: (w: Workspace) {
-	add_build_file("imgui.jai", w);
 }
 
 sync_compile_c :: (path: string, output: string) -> bool {
@@ -19,34 +12,22 @@ sync_compile_c :: (path: string, output: string) -> bool {
 	return true;
 }
 
+compile_imgui_test :: () {
+	w := compiler_create_workspace("imgui test");
+	options := get_build_options();
+	options.output_executable_name = "imgui";
+	options.use_visual_studio_message_format = true;
+	options.text_output_flags = 0;
+	set_build_options(options, w);
+	add_build_file("imgui_test.jai", w);
+}
+
 #run build();
 build :: () {
 	format := *context.print_style.default_format_struct;
         format.use_newlines_if_long_form = true;
-	sync_compile_c("test.c", "test.o");
-	w := compiler_create_workspace("file browser");
-	options := get_build_options();
+	compile_imgui_test();
 	set_build_options_dc(.{do_output=false});
-	configure_options(*options);
-	set_build_options(options, w);
-	// compiler_begin_intercept(w);
-	run_compilation(w);
-#if false {
-		while true {
-			message := compiler_wait_for_message();
-			if message.kind == .COMPLETE break;
-			if message.kind == .PHASE {
-				phase_message := cast(*Message_Phase)message;
-				phase := phase_message.phase;
-				if phase == .READY_FOR_CUSTOM_LINK_COMMAND {
-					run_custom_link_command(message.workspace, phase_message);
-				}
-			}
-		}
-	}
-}
-
-run_custom_link_command :: (w: Workspace, message: *Message) {
 }
 
 #import "Process";

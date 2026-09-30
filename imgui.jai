@@ -39,6 +39,8 @@ Widget_Flags :: enum_flags u32 {
 	Draw_Border;
 	Draw_Text;
 	Hot_Effect;
+	Floating_X;
+	Floating_Y;
 }
 
 Widget_Size_Property :: enum u8 {
@@ -55,8 +57,8 @@ Widget_Size :: struct {
 }
 
 Axies :: enum u8 {
-	X;
-	Y;
+	X :: 0;
+	Y :: 1;
 }
 
 Mouse_Buttons_State :: enum_flags u8 {
@@ -106,6 +108,9 @@ Widget_Stacks :: struct {
 	border_color: Stack(Color, .{0x00, 0x00, 0x00, 0x00});
 	layout_dir: Stack(Axies, .X);
 	font: Stack(Render.font_type, #run -> Render.font_type {x: Render.font_type; return x;}); // TODO(c4llv07e): This is sooo bad...
+	flags: Stack(Widget_Flags, 0);
+	floating_x: Stack(float32, 0);
+	floating_y: Stack(float32, 0);
 }
 
 pop_unused :: (stacks: *Widget_Stacks) {
@@ -232,12 +237,21 @@ init_widget_by_key :: (using gui_state: *Gui_State, key: u64, flags: Widget_Flag
 	widget.text_color = stack_peek(stacks.text_color);
 	widget.background_color = stack_peek(stacks.background_color);
 	widget.border_color = stack_peek(stacks.border_color);
-	widget.flags = flags;
+	additional_flags := stack_peek(stacks.flags);
+	widget.flags = flags | additional_flags;
 	widget.pref_size[Axies.X] = stack_peek(stacks.pref_width);
 	widget.pref_size[Axies.Y] = stack_peek(stacks.pref_height);
 	widget.first = *null_widget;
 	widget.last = *null_widget;
 	widget.layout_dir = stack_peek(stacks.layout_dir);
+	if stacks.floating_y.array.count > 1 {
+		widget.flags |= .Floating_Y;
+		widget.rect.y = stack_peek(stacks.floating_y);
+	}
+	if stacks.floating_x.array.count > 1 {
+		widget.flags |= .Floating_X;
+		widget.rect.x = stack_peek(stacks.floating_x);
+	}
 	pop_unused(*stacks);
 	append_to_parent(parent, widget);
 	return widget;
@@ -396,12 +410,14 @@ calculate_layout_position :: (using gui_state: *Gui_State, root: *Widget, dir: A
 		bound: float32 = 0.0;
 		child := widget.first;
 		while !is_null_widget(child) {
-			if widget.layout_dir == dir {
-				child.rect.pos[dir] = widget.rect.pos[dir] + position;
-				position += child.rect.size[dir];
-			} else {
-				child.rect.pos[dir] = widget.rect.pos[dir];
-				bound = max(bound, child.rect.size[dir]);
+			if !(child.flags & (Widget_Flags.Floating_X<<dir)) {
+				if widget.layout_dir == dir {
+					child.rect.pos[dir] = widget.rect.pos[dir] + position;
+					position += child.rect.size[dir];
+				} else {
+					child.rect.pos[dir] = widget.rect.pos[dir];
+					bound = max(bound, child.rect.size[dir]);
+				}
 			}
 			child = child.next;
 		}

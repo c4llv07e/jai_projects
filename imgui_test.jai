@@ -161,11 +161,14 @@ main :: () {
 				stack_pop(*gui_state.stacks.text_color);
 			}
 			gui_panel_end(*gui_state);
+			stack_set_next(*gui_state.stacks.floating_x, 100);
+			stack_set_next(*gui_state.stacks.floating_y, 100);
 			gui_panel_begin(*gui_state, "floating");
 			{
 				gui_label(*gui_state, "we are floating...");
 			}
 			gui_panel_end(*gui_state);
+			gui_label(*gui_state, "end");
 			prune_entities(*ctx);
 			stack_pop(*gui_state.stacks.font);
 		}

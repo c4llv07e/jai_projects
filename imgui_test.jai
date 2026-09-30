@@ -1,7 +1,7 @@
 Render_State :: struct {
-	render_text :: inline (render_data: render_data_type, x: float32, y: float32, text: string, color: Color = .{0xe3, 0xe3, 0xe3, 0xff}, font_size: float32 = 24.0, font: font_type) {
+	render_text :: inline (render_data: render_data_type, x: float32, y: float32, text: string, color: Color = .{0xe3, 0xe3, 0xe3, 0xff}, font_size: float32 = 0.0, font: font_type) {
 		assert(font != null);
-		draw_text(render_data.renderer, font, x, y, text, cast,force(SDL_Color)color);
+		draw_text(render_data.renderer, font, x, y, text, cast,force(SDL_Color)color, font_size);
 	};
 	measure_string :: inline (render_data: render_data_type, font: font_type, text: string) -> float32 {
 		ok, width := sdl_measure_string(render_data.font, text);
@@ -48,7 +48,7 @@ check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc :
 	}
 }
 
-draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float32, y: float32, text: string, color: SDL_Color = .{0xe3, 0xe3, 0xe3, 0xff}, scale := 1.0) {
+draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float32, y: float32, text: string, color: SDL_Color = .{0xe3, 0xe3, 0xe3, 0xff}, font_size := 0.0) {
 	surface := TTF_RenderText_Blended(font, text.data, xx text.count, color);
 	if !surface {
 		log_error("Can't blit surface: %!", sdl_get_error());
@@ -61,6 +61,10 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float32, y: float32, 
 		return;
 	}
 	defer SDL_DestroyTexture(texture);
+	scale := 1.0;
+	if font_size != 0.0 {
+		scale = font_size / TTF_GetFontSize(font);
+	}
 	dstrect := SDL_FRect.{
 		x = x,
 		y = y,
@@ -163,9 +167,12 @@ main :: () {
 			gui_panel_end(*gui_state);
 			stack_set_next(*gui_state.stacks.floating_x, 100);
 			stack_set_next(*gui_state.stacks.floating_y, 100);
+			stack_set_next(*gui_state.stacks.layout_dir, .Y);
 			gui_panel_begin(*gui_state, "floating");
 			{
+				stack_set_next(*gui_state.stacks.font_size, 48.0);
 				gui_label(*gui_state, "we are floating...");
+				gui_label(*gui_state, "after big text");
 			}
 			gui_panel_end(*gui_state);
 			gui_label(*gui_state, "end");

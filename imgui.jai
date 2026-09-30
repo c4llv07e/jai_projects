@@ -108,6 +108,7 @@ Widget_Stacks :: struct {
 	border_color: Stack(Color, .{0x00, 0x00, 0x00, 0x00});
 	layout_dir: Stack(Axies, .X);
 	font: Stack(Render.font_type, #run -> Render.font_type {x: Render.font_type; return x;}); // TODO(c4llv07e): This is sooo bad...
+	font_size: Stack(float32, 24.0);
 	flags: Stack(Widget_Flags, 0);
 	floating_x: Stack(float32, 0);
 	floating_y: Stack(float32, 0);
@@ -233,7 +234,7 @@ init_widget_by_key :: (using gui_state: *Gui_State, key: u64, flags: Widget_Flag
 	widget.key = key;
 	widget.last_frame_index = frame_index;
 	widget.font = stack_peek(stacks.font);
-	widget.font_size = 24;
+	widget.font_size = stack_peek(stacks.font_size);
 	widget.text_color = stack_peek(stacks.text_color);
 	widget.background_color = stack_peek(stacks.background_color);
 	widget.border_color = stack_peek(stacks.border_color);
@@ -294,7 +295,7 @@ draw_widget :: (using gui_state: *Gui_State, render_data: Render.render_data_typ
 }
 
 debug_widget :: (using gui_state: *Gui_State, render_data: Render.render_data_type, font: Render.font_type, widget: *Widget, x := 300.0, y := 0.0) -> y: float32 {
-	Render.render_text(render_data, x, y, tprint("rect at %", widget.rect), color = .{0xe3, 0xe3, 0xe3, 0xff}, font_size = 24, font = font);
+	Render.render_text(render_data, x, y, tprint("rect at %", widget.font_size, widget.rect), color = .{0xe3, 0xe3, 0xe3, 0xff}, font_size = 24, font = font);
 	y += 24;
 	child := widget.first;
 	while!is_null_widget(child) {

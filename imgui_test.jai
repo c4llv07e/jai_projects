@@ -111,6 +111,7 @@ main :: () {
 	window_state: Window_State;
 	SDL_GetWindowSizeInPixels(window, *window_state.width, *window_state.height);
 	previous_frame_time = SDL_GetTicks();
+	value: float32 = 0.0;
 	while main_loop := true {
 		current_frame_time := SDL_GetTicks();
 		deltatime = (current_frame_time - previous_frame_time) / 1000.0;
@@ -123,7 +124,13 @@ main :: () {
 				case .MOUSE_BUTTON_DOWN;
 				buttons: Mouse_Buttons_State;
 				if event.mouse.button == .LEFT then buttons |= .LEFT;
-				handle_click(*gui_state, .{event.mouse.x, event.mouse.y}, buttons);
+				handle_mouse_down(*gui_state, .{event.mouse.x, event.mouse.y}, buttons);
+				case .MOUSE_BUTTON_UP;
+				buttons: Mouse_Buttons_State;
+				if event.mouse.button == .LEFT then buttons |= .LEFT;
+				handle_mouse_up(*gui_state, .{event.mouse.x, event.mouse.y}, buttons);
+				case .MOUSE_MOTION;
+				handle_mouse_move(*gui_state, .{event.motion.x, event.motion.y});
 				case .WINDOW_RESIZED;
 				window_state.width = event.window.data1;
 				window_state.height = event.window.data2;
@@ -135,7 +142,7 @@ main :: () {
 			stack_push(*gui_state.stacks.font, font);
 			stack_push(*gui_state.stacks.font_size, 16.0);
 			stack_set_next(*gui_state.stacks.pref_width, .{property = .Percent, value = 1.0});
-			stack_set_next(*gui_state.stacks.background_color, .{0x80, 0x00, 0x00, 0xff});
+			stack_set_next(*gui_state.stacks.background_color, .{xx clamp(value, 0, 0xff), 0x00, 0x00, 0xff});
 			gui_panel_begin(*gui_state, "buttons");
 			{
 				gui_label(*gui_state, "test % % %", 1, 2, 3);
@@ -174,6 +181,9 @@ main :: () {
 				stack_set_next(*gui_state.stacks.font_size, 48.0);
 				gui_label(*gui_state, "we are floating...");
 				gui_label(*gui_state, "after big text");
+				stack_set_next(*gui_state.stacks.border_color, .{0x00, 0xff, 0x00, 0xff});
+				stack_set_next(*gui_state.stacks.pref_height, .{property = .Pixels, value = 14.0});
+				gui_slider(*gui_state, *value, 0.0, 255.0);
 			}
 			gui_panel_end(*gui_state);
 			gui_label(*gui_state, "end");

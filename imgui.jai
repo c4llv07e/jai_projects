@@ -69,9 +69,17 @@ Mouse_Buttons_State :: enum_flags u8 {
 	M5;
 }
 
-Widget_Signal :: struct {
+Widget_Frame_Signal :: struct {
 	clicked: Mouse_Buttons_State;
-	hovered: bool;
+}
+
+Widget_Continious_Signal :: struct {
+	holding: bool;
+}
+
+Widget_Signal :: struct {
+	using frame: Widget_Frame_Signal;
+	using continious: Widget_Continious_Signal;
 }
 
 Stack :: struct(element_type: Type, default: element_type) {
@@ -141,12 +149,20 @@ init_stacks :: (stacks: *Widget_Stacks) {
 	}
 }
 
+Widget_Theme :: struct {
+	background_color: Color;
+	border_color: Color;
+	font_size: float32;
+}
+
 Gui_State :: struct {
 	widget_root: *Widget;
 	widgets: [..]*Widget;
 	stacks: Widget_Stacks;
+	theme: Widget_Theme;
+	mouse_pos: Vector2;
 	frame_index: s64;
-};
+}
 
 Widget :: struct {
 	pref_size: [#run enum_values_as_s64(Axies).count]Widget_Size;
@@ -160,7 +176,8 @@ Widget :: struct {
 	background_color: Color;
 	text_color: Color;
 	font_size: float32;
-	frame_signal: Widget_Signal;
+	signal: Widget_Signal;
+	continious_signal: Widget_Continious_Signal; // TODO(c4llv07e): Rename it.
 	last_frame_index: s64;
 	next, prev, first, last, parent: *Widget;
 	layout_dir: Axies;
@@ -234,10 +251,22 @@ init_widget_by_key :: (using gui_state: *Gui_State, key: u64, flags: Widget_Flag
 	widget.key = key;
 	widget.last_frame_index = frame_index;
 	widget.font = stack_peek(stacks.font);
-	widget.font_size = stack_peek(stacks.font_size);
+	if stacks.font_size.array.count > 1 {
+		widget.font_size = stack_peek(stacks.font_size);
+	} else {
+		widget.font_size = gui_state.theme.font_size;
+	}
 	widget.text_color = stack_peek(stacks.text_color);
-	widget.background_color = stack_peek(stacks.background_color);
-	widget.border_color = stack_peek(stacks.border_color);
+	if stacks.background_color.array.count > 1 {
+		widget.background_color = stack_peek(stacks.background_color);
+	} else {
+		widget.background_color = gui_state.theme.background_color;
+	}
+	if stacks.border_color.array.count > 1 {
+		widget.border_color = stack_peek(stacks.border_color);
+	} else {
+		widget.border_color = gui_state.theme.border_color;
+	}
 	additional_flags := stack_peek(stacks.flags);
 	widget.flags = flags | additional_flags;
 	widget.pref_size[Axies.X] = stack_peek(stacks.pref_width);
@@ -274,12 +303,32 @@ gui_label :: (using gui_state: *Gui_State, fmt: string, args: ..Any) -> Widget_S
 		text = tprint(fmt, ..args);
 	}
 	widget := init_widget_by_string(gui_state, text, .Draw_Text);
-	return widget.frame_signal;
+	return widget.signal;
 } @PrintLike;
 
 gui_button :: (using gui_state: *Gui_State, text: string) -> Widget_Signal {
 	widget := init_widget_by_string(gui_state, text, .Clickable | .Draw_Border | .Draw_Background | .Draw_Text);
-	return widget.frame_signal;
+	return widget.signal;
+}
+
+gui_slider :: (using gui_state: *Gui_State, value: *float32, from := 0.0, to := 1.0) -> Widget_Signal {
+	seed := stack_peek(stacks.seed);
+	key :u64= seed * cast(u64)value;
+	stack_set_next(*gui_state.stacks.layout_dir, .X);
+	frame := init_widget_by_key(gui_state, key, .Draw_Border | .Clickable);
+	if frame.signal.holding {
+		value.* = lerp(from, to, (gui_state.mouse_pos.x - frame.rect.x) / frame.rect.w);
+	}
+	stack_set_next(*gui_state.stacks.parents, frame);
+	percent := clamp(((value.* - from) / (to - from)), 0.0, 1.0);
+	stack_set_next(*gui_state.stacks.pref_width, .{property = .Percent, value = percent});
+	space := init_widget_by_key(gui_state, key + 2, 0);
+	stack_set_next(*gui_state.stacks.parents, frame);
+	stack_set_next(*gui_state.stacks.pref_height, .{property = .Percent, value = 1.0});
+	stack_set_next(*gui_state.stacks.pref_width, .{property = .Pixels, value = 10.0});
+	stack_set_next(*gui_state.stacks.background_color, .{0xff, 0x00, 0x00, 0xff});
+	slider := init_widget_by_key(gui_state, key + 1, .Draw_Background);
+	return frame.signal;
 }
 
 draw_widget :: (using gui_state: *Gui_State, render_data: Render.render_data_type, widget: *Widget) {
@@ -313,17 +362,28 @@ gui_render :: (using gui_state: *Gui_State, render_data: Render.render_data_type
 	}
 }
 
-handle_click :: (using gui_State: *Gui_State, point: Vector2, buttons: Mouse_Buttons_State) {
+handle_mouse_down :: (using gui_state: *Gui_State, point: Vector2, buttons: Mouse_Buttons_State) {
 	for widget: widgets {
 		if is_intersecting(widget.rect, point) && widget.flags & .Clickable {
-			widget.frame_signal.clicked |= .LEFT;
+			widget.signal.clicked |= .LEFT;
+			widget.signal.holding = true;
 		}
 	}
 }
 
+handle_mouse_up :: (using gui_state: *Gui_State, point: Vector2, buttons: Mouse_Buttons_State) {
+	for widget: widgets {
+		widget.signal.holding = false;
+	}
+}
+
+handle_mouse_move :: (using gui_state: *Gui_State, point: Vector2) {
+	gui_state.mouse_pos = point;
+}
+
 widget_reset_frame_signal :: (using gui_state: *Gui_State) {
 	for widget: widgets {
-		memset(*widget.frame_signal, 0, size_of(Widget_Signal));
+		memset(*widget.signal.frame, 0, size_of(Widget_Frame_Signal));
 	}
 }
 
@@ -408,7 +468,6 @@ calculate_layout_position :: (using gui_state: *Gui_State, root: *Widget, dir: A
 	widget := root;
 	while !is_null_widget(widget) {
 		position: float32 = 0.0;
-		bound: float32 = 0.0;
 		child := widget.first;
 		while !is_null_widget(child) {
 			if !(child.flags & (Widget_Flags.Floating_X<<dir)) {
@@ -417,12 +476,10 @@ calculate_layout_position :: (using gui_state: *Gui_State, root: *Widget, dir: A
 					position += child.rect.size[dir];
 				} else {
 					child.rect.pos[dir] = widget.rect.pos[dir];
-					bound = max(bound, child.rect.size[dir]);
 				}
 			}
 			child = child.next;
 		}
-		widget.rect.size[dir] = max(bound, widget.rect.size[dir]);
 		widget = iterate_children(root, widget);
 	}
 }
@@ -442,7 +499,7 @@ gui_panel_begin :: (using gui_state: *Gui_State, name: string) -> *Widget {
 
 gui_panel_end :: (using gui_state: *Gui_State) -> Widget_Signal {
 	widget := stack_pop(*stacks.parents);
-	return widget.frame_signal;
+	return widget.signal;
 }
 
 gui_begin :: (using gui_state: *Gui_State, window_state: Window_State) {

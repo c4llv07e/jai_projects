@@ -1,8 +1,7 @@
 #import "Basic";
 #import "String";
 #import,file "sdl3.jai";
-#import,file "theme.jai";
-#import,file "keybinds.jai";
+#load "theme.jai";
 
 enable_render_fan :: true;
 cool :: true;
@@ -42,13 +41,6 @@ Ctx :: struct {
 
 font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
 
-substring :: (s: string, n: s64) -> string {
-	assert(s.count >= n);
-	res : string = s;
-	res.count = n;
-	return res;
-}
-
 render_text :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, text: string) -> (s32, s32) {
         surface: *SDL_Surface = TTF_RenderText_Blended(font, text.data, xx text.count, color);
 	if surface == null {
@@ -85,7 +77,7 @@ render_text_wrapped :: (using ctx: *Ctx, x: float, y: float, color: SDL_Color, t
 			return 0, 0;
 		}
 		if line_text_length <= 0 then line_text_length = 1; // At least draw it partially.
-		text_w, text_h := render_text(ctx, x, y, color, substring(text, xx line_text_length));
+		text_w, text_h := render_text(ctx, x, y, color, slice(text, 0, xx line_text_length));
 		if text.count == xx line_text_length {
 			return line_width, xx y;
 		}
@@ -196,10 +188,10 @@ render :: (using ctx: *Ctx) {
 			}
 			clip_rect := SDL_Rect.{xx SDL_floorf(x), xx SDL_floorf(y), xx SDL_ceilf(row.width), xx SDL_ceilf(col.height)};
 			SDL_SetRenderClipRect(renderer, *clip_rect);
-			rect_line(renderer, .{x, y, row.width, col.height}, border_color);
+			draw_rect_lines(renderer, .{x, y, row.width, col.height}, border_color);
 			// print("rect = %\n", SDL_FRect.{x, y, row.width, col.height});
 			render_text_wrapped(ctx, x, y, color, col.text, xx row.width);
-			line_x, line_y := wrap_text(ctx, substring(col.text, min(col.text.count, col.cursor)), xx row.width);
+			line_x, line_y := wrap_text(ctx, slice(col.text, 0, col.cursor), xx row.width);
 			fill_rect(renderer, .{x + line_x, y + line_y, 4, xx font_height}, .{0x99, 0x00, 0x00, 0xff});
 			y += col.height;
 		}
@@ -249,7 +241,7 @@ main :: () {
         if !TTF_Init() {
                 print("Can't init SDL_TTF: %\n", sdl_get_error());
         }
-        font = TTF_OpenFont(font_path.data, 24);
+	font = TTF_OpenFont(font_path.data, 16);
         if font == null {
                 print("Can't load font at %: %\n", font_path, sdl_get_error());
         }

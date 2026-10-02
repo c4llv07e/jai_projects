@@ -12,6 +12,17 @@ sync_compile_c :: (path: string, output: string) -> bool {
 	return true;
 }
 
+compile_single_file :: (source_file: string, out_name: string = "") {
+	w := compiler_create_workspace(source_file);
+	options := get_build_options();
+	if out_name.count > 0
+		options.output_executable_name = out_name;
+	options.use_visual_studio_message_format = true;
+	options.text_output_flags = 0;
+	set_build_options(options, w);
+	add_build_file(source_file, w);
+}
+
 compile_imgui_test :: () {
 	w := compiler_create_workspace("imgui test");
 	options := get_build_options();
@@ -26,7 +37,9 @@ compile_imgui_test :: () {
 build :: () {
 	format := *context.print_style.default_format_struct;
         format.use_newlines_if_long_form = true;
-	compile_imgui_test();
+	compile_single_file("imgui_test.jai", "imgui");
+	compile_single_file("editor.jai", "editor");
+	compile_single_file("keybinds_test.jai", "keybinds");
 	set_build_options_dc(.{do_output=false});
 }
 

@@ -404,11 +404,10 @@ calculate_layout_standalone :: (using gui_state: *Gui_State, root: *Widget, dir:
 			widget.rect.size[dir] = widget.pref_size[dir].value;
 			case .Content;
 			if dir == .X {
-				ok, width := sdl_measure_string(widget.font, widget.text);
+				width := Render.measure_string(widget.font, widget.text, widget.font_size);
 				widget.rect.w = width + widget.pref_size[Axies.X].value;
 			} else {
-				height := TTF_GetFontHeight(widget.font);
-				widget.rect.h = xx height;
+				widget.rect.h = widget.font_size;
 			}
 		}
 		widget = iterate_children(root, widget);
@@ -523,4 +522,3 @@ gui_end :: (using gui_state: *Gui_State) {
 #import "Math";
 #import "Hash";
 #import "Basic";
-#import,file "sdl3.jai";

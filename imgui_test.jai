@@ -3,9 +3,12 @@ Render_State :: struct {
 		assert(font != null);
 		draw_text(render_data.renderer, font, x, y, text, cast,force(SDL_Color)color, font_size);
 	};
-	measure_string :: inline (render_data: render_data_type, font: font_type, text: string) -> float32 {
-		ok, width := sdl_measure_string(render_data.font, text);
-		return xx width;
+	measure_string :: inline (font: font_type, text: string, font_size: float32 = 0.0) -> float32 {
+		scale := 1.0;
+		if font_size != 0.0
+			scale = font_size / TTF_GetFontSize(font);
+		ok, width := sdl_measure_string(font, text);
+		return (xx width) * scale;
 	};
 	render_rect :: inline (using render_data: render_data_type, rect: Rect, color: Color) {
 		sdl_set_color(renderer, cast,force(SDL_Color)color);
@@ -176,14 +179,23 @@ main :: () {
 			stack_set_next(*gui_state.stacks.floating_x, 100);
 			stack_set_next(*gui_state.stacks.floating_y, 100);
 			stack_set_next(*gui_state.stacks.layout_dir, .Y);
+			stack_set_next(*gui_state.stacks.border_color, .{0xff, 0x00, 0xff, 0xff});
+			stack_set_next(*gui_state.stacks.flags, .Draw_Border);
+			stack_set_next(*gui_state.stacks.pref_height, .{property = .Shrink});
+			stack_set_next(*gui_state.stacks.pref_width, .{property = .Shrink});
 			gui_panel_begin(*gui_state, "floating");
 			{
+				x: float32;
 				stack_set_next(*gui_state.stacks.font_size, 48.0);
+				stack_set_next(*gui_state.stacks.border_color, .{0xff, 0x00, 0xff, 0xff});
+				stack_set_next(*gui_state.stacks.flags, .Draw_Border);
+				stack_set_next(*gui_state.stacks.pref_width, .{property = .Content});
 				gui_label(*gui_state, "we are floating...");
 				gui_label(*gui_state, "after big text");
 				stack_set_next(*gui_state.stacks.border_color, .{0x00, 0xff, 0x00, 0xff});
 				stack_set_next(*gui_state.stacks.pref_height, .{property = .Pixels, value = 14.0});
 				gui_slider(*gui_state, *value, 0.0, 255.0);
+				gui_label(*gui_state, tprint("%", value));
 			}
 			gui_panel_end(*gui_state);
 			gui_label(*gui_state, "end");

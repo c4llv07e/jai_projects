@@ -1,3 +1,5 @@
+#module_parameters ($key_type: Type = u32, $string_to_key: (string) -> $key_type = string_to_u32) () {}
+
 Keybind_Callback :: #type ();
 
 Modifier :: enum_flags u16 {
@@ -9,7 +11,7 @@ Modifier :: enum_flags u16 {
 }
 
 Keybind :: struct {
-	key: u32;
+	key: key_type;
 	mod: Modifier;
 	next: [..]Keybind;
 	command: string;
@@ -52,7 +54,7 @@ char_to_mod :: (char: u8) -> Modifier {
 
 // Case sensitve because shift considered a layer key (so S-8 wouldn't
 // mean the same as numpad's * on qwerty keyboard) -- humble dvorak user.
-parse_combo :: (combo: string) -> key: u32, mod: Modifier {
+parse_combo :: (combo: string) -> key: key_type, mod: Modifier {
 	mod: Modifier = 0;
 	remaing := combo;
 	for 0..100 {
@@ -62,10 +64,7 @@ parse_combo :: (combo: string) -> key: u32, mod: Modifier {
 		found, key_str, remaing = split_from_left(remaing, #char "-");
 		if !found {
 			// it's key
-			if key_str.count > 1 {
-				log_error("key '%' is too big, don't know how to parse it", key_str);
-			}
-			return string_to_u32(key_str), mod;
+			return string_to_key(key_str), mod;
 		}
 		if key_str.count > 1 {
 			log_error("mod '%' is not single byte, something is wrong with config", key_str);
@@ -73,6 +72,15 @@ parse_combo :: (combo: string) -> key: u32, mod: Modifier {
 		mod |= char_to_mod(key_str.data[0]);
 	}
 	return 0, 0;
+}
+
+walk_key :: (keybind: *Keybind, key: key_type, mod: Modifier) -> *Keybind {
+	for * next: keybind.next {
+		if next.mod == mod && next.key == key {
+			return next;
+		}
+	}
+	return null;
 }
 
 generate_keybinds :: (filepath: string) -> Keybind {
@@ -124,7 +132,7 @@ generate_keybinds :: (filepath: string) -> Keybind {
 			parent = *parent.next[found_index];
 			if parent.command {
 				// Good luck finding this keybind, because we have no trace back from this!
-				log_error("Keybind % already have a command, but was tried to rebind by line '%'", line);
+				log_error("Keybind % already have a command, but was tried to rebind by line '%'", parent.*, line);
 				return root;
 			}
 		}

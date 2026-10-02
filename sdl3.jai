@@ -31,10 +31,12 @@ SDL_KeyboardID :: u32;
 SDL_WindowID :: u32;
 
 SDL_Scancode :: enum u32 {
+	F :: 9;
         I :: 12;
 	L :: 15;
 	M :: 16;
 	S :: 22;
+	X :: 27;
 	BACKSPACE :: 42;
 	RIGHT :: 79;
 	LEFT :: 80;
@@ -279,6 +281,7 @@ SDL_SetRenderDrawBlendMode :: (renderer: *SDL_Renderer, blendMode: SDL_BlendMode
 SDL_DestroySurface :: (surface: *SDL_Surface) #foreign sdl3;
 SDL_RenderTexture :: (renderer: *SDL_Renderer, texture: *SDL_Texture, srcrect: *SDL_FRect, dstrect: *SDL_FRect) -> bool #foreign sdl3;
 SDL_DestroyTexture :: (texture: *SDL_Texture) #foreign sdl3;
+SDL_GetScancodeFromName :: (name: *u8) -> SDL_Scancode #foreign sdl3;
 SDL_GetError :: () -> *u8 #foreign sdl3;
 SDL_Delay :: (ms: u32) #foreign sdl3;
 SDL_GetVersion :: () -> s32 #foreign sdl3;
@@ -327,6 +330,14 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 	
 	sdl_set_color :: (renderer: *SDL_Renderer, color: SDL_Color) {
 		SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+	}
+	
+	sdl_scancode_from_string :: (name: string) -> SDL_Scancode {
+		// Maximum length has "ThousandsSeparator" key with length 18, so 32 symbols is more than enough.
+		tmp_data: [32]u8;
+		memcpy(tmp_data.data, name.data, name.count);
+		tmp_data[name.count] = 0;
+		return SDL_GetScancodeFromName(tmp_data.data);
 	}
 	
 	fill_rect :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {

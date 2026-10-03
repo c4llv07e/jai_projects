@@ -37,6 +37,7 @@ SDL_Scancode :: enum u32 {
 	M :: 16;
 	S :: 22;
 	X :: 27;
+	RETURN :: 40;
 	BACKSPACE :: 42;
 	RIGHT :: 79;
 	LEFT :: 80;
@@ -317,10 +318,13 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 	TTF_OpenFont :: (file: *u8, ptsize: float32) -> *TTF_Font #foreign sdl3_ttf;
 	TTF_RenderText_Blended :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color) -> *SDL_Surface #foreign sdl3_ttf;
 	TTF_RenderText_Blended_Wrapped :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color, wrap_width: s32) -> *SDL_Surface #foreign sdl3_ttf;
+	TTF_GetStringSize :: (font: *TTF_Font, text: *u8, length: u64, w: *s32, h: *s32) -> bool #foreign sdl3_ttf;
+	TTF_GetStringSizeWrapped :: (font: *TTF_Font, text: *u8, length: u64, wrap_width: s32, w: *s32, h: *s32) -> bool #foreign sdl3_ttf;
 	TTF_MeasureString :: (font: *TTF_Font, text: *u8, length: u64, max_width: s32, measured_width: *s32, measured_length: *u64) -> bool #foreign sdl3_ttf;
 	TTF_SetFontSize :: (font: *TTF_Font, ptsize: float32) -> bool #foreign sdl3_ttf;
 	TTF_GetFontSize :: (font: *TTF_Font) -> float32 #foreign sdl3_ttf;
 	TTF_GetFontHeight :: (font: *TTF_Font) -> s32 #foreign sdl3_ttf;
+	TTF_GetGlyphMetrics :: (font: *TTF_Font, ch: u32, minx: *s32, maxx: *s32, miny: *s32, maxy: *s32, advance: *s32) -> bool #foreign sdl3_ttf;
 }
 
 #if ENABLE_JAI_FEATURES {
@@ -352,6 +356,11 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 	
 	is_intersecting :: (rect: SDL_FRect, point: SDL_FPoint) -> bool {
 		return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
+	}
+	
+	sdl_render_line :: (renderer: *SDL_Renderer, from: SDL_FPoint, to: SDL_FPoint, color: SDL_Color) {
+		sdl_set_color(renderer, color);
+		SDL_RenderLine(renderer, from.x, from.y, to.x, to.y);
 	}
 	
 	sdl_debug_version_info :: () {

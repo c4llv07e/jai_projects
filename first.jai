@@ -40,6 +40,7 @@ build :: () {
 	compile_single_file("imgui_test.jai", "imgui");
 	compile_single_file("editor.jai", "editor");
 	compile_single_file("keybinds_test.jai", "keybinds");
+	compile_single_file("ste.jai", "ste");
 	set_build_options_dc(.{do_output=false});
 }
 

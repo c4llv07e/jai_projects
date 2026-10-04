@@ -39,6 +39,7 @@ SDL_Scancode :: enum u32 {
 	X :: 27;
 	RETURN :: 40;
 	BACKSPACE :: 42;
+	TAB :: 43;
 	RIGHT :: 79;
 	LEFT :: 80;
 	DOWN :: 81;
@@ -308,6 +309,10 @@ SDL_fabsf :: (x: float32) -> float32 #foreign sdl3;
 SDL_fabs :: (x: float64) -> float64 #foreign sdl3;
 SDL_expf :: (x: float32) -> float32 #foreign sdl3;
 SDL_exp :: (x: float64) -> float64 #foreign sdl3;
+SDL_logf :: (x: float32) -> float32 #foreign sdl3;
+SDL_log :: (x: float64) -> float64 #foreign sdl3;
+SDL_log10f :: (x: float32) -> float32 #foreign sdl3;
+SDL_log10 :: (x: float64) -> float64 #foreign sdl3;
 
 #if ENABLE_TTF {
 	sdl3_ttf :: #system_library "libSDL3_ttf.so";
@@ -318,6 +323,7 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 	TTF_OpenFont :: (file: *u8, ptsize: float32) -> *TTF_Font #foreign sdl3_ttf;
 	TTF_RenderText_Blended :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color) -> *SDL_Surface #foreign sdl3_ttf;
 	TTF_RenderText_Blended_Wrapped :: (font: *TTF_Font, text: *u8, length: u64, fg: SDL_Color, wrap_width: s32) -> *SDL_Surface #foreign sdl3_ttf;
+	TTF_RenderGlyph_Blended :: (font: *TTF_Font, ch: u32, fg: SDL_Color) -> *SDL_Surface #foreign sdl3_ttf;
 	TTF_GetStringSize :: (font: *TTF_Font, text: *u8, length: u64, w: *s32, h: *s32) -> bool #foreign sdl3_ttf;
 	TTF_GetStringSizeWrapped :: (font: *TTF_Font, text: *u8, length: u64, wrap_width: s32, w: *s32, h: *s32) -> bool #foreign sdl3_ttf;
 	TTF_MeasureString :: (font: *TTF_Font, text: *u8, length: u64, max_width: s32, measured_width: *s32, measured_length: *u64) -> bool #foreign sdl3_ttf;
@@ -378,6 +384,10 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 		};
 	}
 	
+	color_dim_by :: inline (using color: SDL_Color, value: float32) -> SDL_Color {
+		return SDL_Color.{xx (r / value), xx (g / value), xx (b / value), a};
+	}
+	
 	rect_origin :: inline (rect: SDL_FRect) -> SDL_FPoint {
 		return .{rect.x, rect.y};
 	}
@@ -416,6 +426,12 @@ SDL_exp :: (x: float64) -> float64 #foreign sdl3;
 			measured_length: u64;
 			res := TTF_MeasureString(font, text.data, cast(u64)text.count, max_width, *measured_width, *measured_length);
 			return res, measured_width, measured_length;
+		}
+		
+		sdl_char_width :: (font: *TTF_Font, ch: u32) -> width: s32, ok: bool {
+			width: s32;
+			ok := TTF_GetGlyphMetrics(font, ch, null, null, null, null, *width);
+			return width, ok;
 		}
 	}
 }

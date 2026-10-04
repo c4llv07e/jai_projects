@@ -12,6 +12,8 @@ Ctx :: struct {
 	window: *SDL_Window;
 	renderer: *SDL_Renderer;
 	font: *TTF_Font;
+	space_texture: *SDL_Texture;
+	tab_texture: *SDL_Texture;
 	window_width, window_height: s64;
 	cursor: s64;
 	text_buffer: [..]u8;
@@ -20,6 +22,7 @@ Ctx :: struct {
 	visual_lines: [..]Visual_Line;
 	should_render: bool;
 	is_ctrl_held: bool;
+	tab_width: s32 = 8; // Per spaces
 }
 
 calculate_vislines :: (using ctx: *Ctx) {
@@ -32,6 +35,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 	line_begin := sv;
 	hard_locked := true;
 	before_char: string;
+	digit_width := sdl_char_width(font, #char "9"); // the most wide one. Maybe one day I will calculate max width of all digits.
 	for 0..1024 {
 		before_char = sv;
 		cp, ok := utf8_next_character(*sv);
@@ -57,9 +61,8 @@ calculate_vislines :: (using ctx: *Ctx) {
 		}
 	}
 	assert(!hard_locked, "Hard locked at generating visual lines");
-	if sv.data != line_begin.data {
-		array_add(*visual_lines, .{line_begin.data - text_buffer.data, sv.data - line_begin.data});
-	}
+	array_add(*visual_lines, .{line_begin.data - text_buffer.data, sv.data - line_begin.data});
+	line_number_width = (1 + SDL_ceilf(SDL_log10f(xx (visual_lines.count + 1)))) * digit_width;
 }
 
 draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, color: SDL_Color, text: string) -> (s32, s32) {
@@ -88,24 +91,37 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, colo
 	return texture.w, texture.h;
 }
 
-draw_text_wrapped :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, color: SDL_Color, text: string, wrap_width: s32 = 0, caller_loc := #caller_location) -> (x: s32, y: s32) {
-	font_height := TTF_GetFontSize(font);
-	assert(font_height > 0.0, "Can't get font size.");
-	while text.count > 0 {
-		ok, line_width, line_text_length := sdl_measure_string(font, text, wrap_width);
-		if !ok {
-			log_error("Error on rendering wrapped text: %", sdl_get_error());
-			return 0, 0;
+draw_fancy_text :: (using ctx: *Ctx, x: float, y: float, text: string, color: SDL_Color = .{0xe3, 0xe3, 0xe3, 0xff}) {
+	special_chars :: " \t";
+	sv := text;
+	while true {
+		match := find_index_of_any_from_left(sv, special_chars);
+		if match == -1 {
+			draw_text(renderer, font, x, y, color, sv);
+			break;
 		}
-		if line_text_length <= 0 then line_text_length = 1; // At least draw it partially.
-		text_w, text_h := draw_text(renderer, font, x, y, color, slice(text, 0, xx line_text_length));
-		if text.count == xx line_text_length {
-			return xx x + line_width, xx y;
+		if match != 0 {
+			offset_x, offset_y := draw_text(renderer, font, x, y, color, slice(sv, 0, match));
+			advance(*sv, match);
+			x += offset_x;
 		}
-		advance(*text, xx line_text_length);
-		y += font_height;
+		while sv.count > 0 && is_any(sv.data[0], special_chars) {
+			if sv.data[0] == {
+				case #char " ";
+				rect := SDL_FRect.{SDL_floorf(x), SDL_floorf(y), xx space_texture.w, xx space_texture.h};
+				SDL_RenderTexture(renderer, space_texture, null, *rect);
+				x += space_texture.w;
+				case #char "\t";
+				rect := SDL_FRect.{SDL_floorf(x), SDL_floorf(y), xx tab_texture.w, xx tab_texture.h};
+				SDL_RenderTexture(renderer, tab_texture, null, *rect);
+				x += tab_texture.w;
+				case;
+				log_error("% is in special_chars, but not in switch case to handle them.");
+			}
+			advance(*sv, 1);
+		}
+		if sv.count <= 0 break;
 	}
-	return xx x, xx y;
 }
 
 offset_to_visline_index :: (using ctx: *Ctx, offset: s64) -> s64 {
@@ -113,6 +129,31 @@ offset_to_visline_index :: (using ctx: *Ctx, offset: s64) -> s64 {
 		if it.start_byte_offset > offset then return it_index - 1;
 	}
 	return visual_lines.count - 1;
+}
+
+measure_char_or_tab :: (using,except(font) ctx: *Ctx, font: *TTF_Font, ch: u32) -> width: s32 {
+	if ch == #char "\t" then return xx tab_texture.w;
+	else return sdl_char_width(font, ch);
+}
+
+measure_string_with_tab :: (using,except(font,width) ctx: *Ctx, font: *TTF_Font, text: string, max_width: s32 = 0) -> width: s32, length: u64 {
+	width: s32 = 0;
+	length: u64 = 0;
+	if !text then return 0, 0;
+	for :utf8_iter text {
+		ch_width := measure_char_or_tab(ctx, font, it);
+		if max_width != 0 && (width + ch_width > max_width) {
+			return width, length;
+		}
+		width += ch_width;
+		length += trailingBytesForUTF8[it] + 1;
+	}
+	return width, length;
+}
+
+draw_on_left :: (using ctx: *Ctx, y: float32, text: string, color: SDL_Color = .{0xe3, 0xe3, 0xe3, 0xff}) {
+	ok, width := sdl_measure_string(font, text);
+	draw_text(renderer, font, xx (window_width - width), y, color, text);
 }
 
 render_frame_count := 0;
@@ -124,39 +165,31 @@ render :: (using ctx: *Ctx) {
 	font_height := TTF_GetFontHeight(font);
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
-	render_frame_string := tprint("%", render_frame_count);
-	ok, render_frame_width := sdl_measure_string(font, render_frame_string);
-	scroll_value_string := tprint("%", scroll);
-	scroll_value_width: s32;
-	ok, scroll_value_width = sdl_measure_string(font, scroll_value_string);
-	buffer_string := tprint("%", text_buffer);
-	buffer_width: s32;
-	ok, buffer_width = sdl_measure_string(font, buffer_string);
-	draw_text(renderer, font, xx (window_width - render_frame_width), 0, .{0xe3, 0xe3, 0xe3, 0xff}, render_frame_string);
-	draw_text(renderer, font, xx (window_width - scroll_value_width), xx font_height, .{0xe3, 0xe3, 0xe3, 0xff}, scroll_value_string);
-	draw_text(renderer, font, xx (window_width - buffer_width), xx (font_height * 2), .{0xe3, 0xe3, 0xe3, 0xff}, buffer_string);
+	draw_on_left(ctx, 0, tprint("%", render_frame_count));
+	//draw_on_left(ctx, xx (font_height), tprint("visline count = %", visual_lines.count));
+	//draw_on_left(ctx, xx (font_height * 2), tprint("%", text_buffer));
 	for visual_lines {
 		line: string = ---;
 		line.data = *text_buffer.data[it.start_byte_offset];
 		line.count = it.length;
+		draw_text(renderer, font, 0, xx (it_index * font_height) - scroll, .{0x43, 0x83, 0x43, 0xff}, tprint("%", it_index + 1));
 		if line.count <= 0 {
 			continue;
 		}
-		draw_rect_lines(renderer, .{line_number_width, - scroll + xx (it_index * font_height), xx (line.count * 10), xx font_height}, .{0xff, 0x00, 0x00, 0xff});
-		draw_text(renderer, font, line_number_width, - scroll + xx (it_index * font_height), .{0xe3, 0xe3, 0xe3, 0xff}, line);
+		line_width := measure_string_with_tab(ctx, font, line);
+		draw_rect_lines(renderer, .{line_number_width, - scroll + xx (it_index * font_height), xx line_width, xx font_height}, .{0xff, 0x00, 0x00, 0xff});
+		draw_fancy_text(ctx, line_number_width, - scroll + xx (it_index * font_height), line);
 	}
 	if visual_lines { // Cursor
 		cursor_visline_index := offset_to_visline_index(ctx, cursor);
 		cursor_visline := visual_lines[cursor_visline_index];
 		before_cursor_string_length := (cursor - cursor_visline.start_byte_offset);
-		ok: bool;
 		width: s32;
-		length: u64;
 		if before_cursor_string_length > 0
-			ok, width, length = sdl_measure_string(font, slice(cast(string)text_buffer, cursor_visline.start_byte_offset, before_cursor_string_length));
+			width = measure_string_with_tab(ctx, font, slice(cast(string)text_buffer, cursor_visline.start_byte_offset, before_cursor_string_length));
 		else
 			width = 0;
-		fill_rect(renderer, .{xx width, xx ((cursor_visline_index * font_height) - scroll), 2, xx font_height}, .{0x00, 0xff, 0x00, 0xff});
+		fill_rect(renderer, .{line_number_width + xx width, xx ((cursor_visline_index * font_height) - scroll), 2, xx font_height}, .{0x00, 0xff, 0x00, 0xff});
 	}
 	SDL_RenderPresent(renderer);
 	render_frame_count += 1;
@@ -170,24 +203,16 @@ check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc :
 	}
 }
 
-find_newline :: (using ctx: *Ctx, sv: string, buffer_width: float32) -> s64 {
-	ok, width, chopped_count := sdl_measure_string(font, sv, xx buffer_width);
-	assert(ok, "Can't measure line %", sv);
-	visline := slice(sv, 0, xx chopped_count);
-	newline_index := find_index_from_left(visline, #char "\n");
-	if newline_index != -1 then return newline_index; // If in visual line \n was found, it means line is smaller than visline.
-	return xx chopped_count;
-}
-
 point_to_cursor :: (using ctx: *Ctx, point_x: float32, point_y: float32) -> s64 {
 	y := 0.0;
 	font_height := TTF_GetFontHeight(font);
 	sv := cast(string)text_buffer;
 	point_y += scroll;
+	point_x -= line_number_width;
 	if point_y < 0 return 0;
 	for visual_lines {
 		if y <= point_y && y + font_height >= point_y {
-			ok, width, length := sdl_measure_string(font, slice(sv, it.start_byte_offset, it.length), xx point_x);
+			width, length := measure_string_with_tab(ctx, font, slice(sv, it.start_byte_offset, it.length), xx point_x);
 			return it.start_byte_offset + xx length;
 		}
 		y += font_height;
@@ -195,26 +220,23 @@ point_to_cursor :: (using ctx: *Ctx, point_x: float32, point_y: float32) -> s64 
 	return sv.count;
 }
 
-cursor_position :: (using ctx: *Ctx) -> (x: float32, y: float32) {
-	y := scroll;
-	hard_lock := true;
-	font_height := TTF_GetFontHeight(font);
-	sv := cast(string)text_buffer;
-	sv = slice(sv, 0, cursor);
-	for 0..255 {
-		ok, width, chopped_line := sdl_measure_string(font, sv, xx (window_width - line_number_width));
-		assert(ok, "Can't measure %", sv);
-		if sv.count < xx chopped_line {
-			return 0, y;
-		}
-		advance(*sv, xx chopped_line);
-		y += font_height;
+create_textures :: (using ctx: *Ctx) {
+	{ // space
+		space_surface := TTF_RenderGlyph_Blended(font, #char ".", color_dim_by(.{0xe3, 0xe3, 0xe3, 0xff}, 2));
+		assert(space_surface != null, "Can't generate space surface!");
+		defer SDL_DestroySurface(space_surface);
+		space_texture = SDL_CreateTextureFromSurface(renderer, space_surface);
+		assert(space_texture != null, "Can't generate space texture!");
 	}
-	if hard_lock {
-		log_error("Can't find cursor over iterating, maybe a hard lock!");
-		exit(-1);
+	{ // tab
+		tab_text :: ">>      ";
+		assert(tab_text.count == tab_width, "Tab texture size isn't aligned with tab_width");
+		tab_surface := TTF_RenderText_Blended(font, tab_text.data, tab_text.count, color_dim_by(.{0xe3, 0xe3, 0xe3, 0xff}, 2));
+		assert(tab_surface != null, "Can't generate tab surface!");
+		defer SDL_DestroySurface(tab_surface);
+		tab_texture = SDL_CreateTextureFromSurface(renderer, tab_surface);
+		assert(tab_texture != null, "Can't generate tab texture!");
 	}
-	return 0, y;
 }
 
 main :: () {
@@ -226,6 +248,7 @@ main :: () {
 	check_sdl(SDL_CreateWindowAndRenderer("ste", initial_width, initial_height, .RESIZABLE, *window, *renderer), "Can't create SDL output");
 	font = TTF_OpenFont(font_path, 16);
 	event: SDL_Event;
+	create_textures(*ctx);
 	should_render = true;
 	SDL_StartTextInput(window);
 	while main_loop := true {
@@ -257,6 +280,10 @@ main :: () {
 					}
 					case .RETURN;
 					array_insert_at(*text_buffer, #char "\n", cursor);
+					cursor += 1;
+					should_render = true;
+					case .TAB;
+					array_insert_at(*text_buffer, #char "\t", cursor);
 					cursor += 1;
 					should_render = true;
 					case .BACKSPACE;
@@ -311,7 +338,8 @@ main :: () {
 	}
 }
 
-#import "Unicode";
+Math :: #import "Math";
+#import,file "Unicode.jai";
 #import,file "sdl3.jai";
 #import "Basic";
 #import "String";

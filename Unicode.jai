@@ -15,6 +15,45 @@ UNI_MAX_BMP          :: 0x0000FFFF;
 UNI_MAX_UTF16        :: 0x0010FFFF;
 UNI_MAX_UTF32        :: 0x7FFFFFFF;
 
+// begin of c4llv07e functions ===================================================
+
+utf8_step_back :: (sv: string, cursor: *s64, loc := #caller_location) {
+	Basic.assert(cursor != null, "Cursor is null", loc);
+	if cursor.* <= 0 then return;
+	cursor.* -= 1;
+	while cursor.* > 0 && ((sv.data[cursor.*] & 0xc0) == 0x80) {
+		cursor.* -= 1;
+	}
+	if (sv.data[cursor.*] & 0xc0) == 0x80 {
+		Basic.log_error("partial unicode symbol at the beginning of the string view");
+	}
+}
+
+utf8_advance :: (s: *string, amount: s64) {
+	Basic.assert(amount >= 0);
+	while amount > 0 {
+		utf8_next_character(s);
+		amonut -= 1;
+	}
+}
+
+utf8_find_index_from_left :: (s: string, cp: u32) -> s64 {
+	for :utf8_iter s {
+		if it == cp then return it_index;
+	}
+	return -1;
+}
+
+utf8_find_index_from_right :: (s: string, cp: u32) -> s64 {
+	last_index: s64 = -1;
+	for :utf8_iter s {
+		if it == cp then last_index = it_index;
+	}
+	return last_index;
+}
+
+// end of c4llv07e functions ===================================================
+
 character_utf8_to_utf32 :: (s: *u8, source_length: s64, $strict := false) -> u32, s64, Unicode_Result {
 	continuation_bytes := trailingBytesForUTF8[s[0]];
 	if continuation_bytes + 1 > source_length {

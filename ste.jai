@@ -17,6 +17,7 @@ Ctx :: struct {
 	space_texture: *SDL_Texture;
 	tab_texture: *SDL_Texture;
 	window_width, window_height: s64;
+	required_cursor_width: s64;
 	cursor: s64;
 	cursor_interp: SDL_FPoint;
 	real_cursor_position: SDL_FPoint;
@@ -134,7 +135,7 @@ draw_fancy_text :: (using ctx: *Ctx, x: float, y: float, text: string, color: SD
 				SDL_RenderTexture(renderer, tab_texture, null, *rect);
 				x += space_width * tab_width;
 				case;
-				log_error("% is in special_chars, but not in switch case to handle them.");
+				log_error("% is in special_chars, but not in switch case to handle them.", sv.data[0]);
 			}
 			advance(*sv, 1);
 		}
@@ -154,13 +155,13 @@ measure_char_or_tab :: (using,except(font) ctx: *Ctx, font: *TTF_Font, ch: u32) 
 	else return sdl_char_width(font, ch);
 }
 
-measure_string_with_tab :: (using,except(font,width) ctx: *Ctx, font: *TTF_Font, text: string, max_width: s32 = 0) -> width: s32, length: u64 {
+measure_string_with_tab :: (using,except(font,width) ctx: *Ctx, font: *TTF_Font, text: string, max_width: s64 = -1) -> width: s32, length: u64 {
 	width: s32 = 0;
 	length: u64 = 0;
 	if !text then return 0, 0;
 	for :utf8_iter text {
 		ch_width := measure_char_or_tab(ctx, font, it);
-		if max_width != 0 && (width + ch_width > max_width) {
+		if max_width != -1 && (width + ch_width > max_width) {
 			return width, length;
 		}
 		width += ch_width;
@@ -204,6 +205,7 @@ render :: (using ctx: *Ctx) {
 	SDL_RenderClear(renderer);
 	draw_on_left(ctx, 0, tprint("%", render_frame_count));
 	draw_on_left(ctx, xx (font_height * 2), tprint("%", cursor));
+	draw_on_left(ctx, xx (font_height * 3), tprint("%", required_cursor_width));
 	max_real_line_number := 0;
 	for visual_lines {
 		if (xx ((it_index + 1) * font_height) - scroll_interp) < 0 then continue;
@@ -274,6 +276,53 @@ create_textures :: (using ctx: *Ctx) {
 	}
 }
 
+// TODO(c4llv07e): From the end of a file jumps over two lines.
+go_up_line :: (using ctx: *Ctx) {
+	sv := cast(string)text_buffer;
+	first_nl := find_index_from_right(slice(sv, 0, cursor), #char "\n");
+	if first_nl <= 0 {
+		cursor = 0;
+		return;
+	}
+	if required_cursor_width == -1 {
+		update_required_cursor_width(ctx);
+	}
+	second_nl := find_index_from_right(slice(sv, 0, first_nl), #char "\n");
+	if required_cursor_width == 0 {
+		cursor = second_nl + 1;
+		return;
+	}
+	second_width, length := measure_string_with_tab(ctx, font, slice(sv, second_nl + 1, first_nl - second_nl - 1), xx required_cursor_width);
+	cursor = second_nl + 1 + xx length;
+}
+
+go_down_line :: (using ctx: *Ctx) {
+	sv := cast(string)text_buffer;
+	first_nl := find_index_from_left(slice(sv, cursor, sv.count), #char "\n");
+	if first_nl < 0 {
+		cursor = sv.count;
+		return;
+	}
+	first_nl += cursor;
+	if required_cursor_width == -1 {
+		update_required_cursor_width(ctx);
+	}
+	second_nl := find_index_from_left(slice(sv, first_nl + 1, sv.count), #char "\n");
+	if second_nl == -1 {
+		second_nl = sv.count;
+	} else {
+		second_nl += first_nl + 1;
+	}
+	second_width, length := measure_string_with_tab(ctx, font, slice(sv, first_nl + 1, second_nl - first_nl - 1), xx required_cursor_width);
+	cursor = first_nl + 1 + xx length;
+}
+
+update_required_cursor_width :: inline (using ctx: *Ctx) {
+	sv := cast(string)text_buffer;
+	line_start := find_index_from_right(slice(sv, 0, cursor), #char "\n");
+	required_cursor_width = measure_string_with_tab(ctx, font, slice(sv, line_start + 1, cursor - line_start - 1));
+}
+
 main :: () {
 	using ctx := Ctx.{};
 	initial_width :: 800;
@@ -322,6 +371,7 @@ main :: () {
 						while cursor > 0 && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
 							cursor -= 1;
 						}
+						required_cursor_width = -1;
 						should_render = true;
 					}
 					case .RIGHT;
@@ -330,23 +380,28 @@ main :: () {
 						while cursor < text_buffer.count && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
 							cursor += 1;
 						}
+						required_cursor_width = -1;
 						should_render = true;
 					}
 					case .UP;
 					if cursor > 0 {
+						go_up_line(*ctx);
 						should_render = true;
 					}
 					case .DOWN;
 					if cursor < text_buffer.count {
+						go_down_line(*ctx);
 						should_render = true;
 					}
 					case .RETURN;
 					array_insert_at(*text_buffer, #char "\n", cursor);
 					cursor += 1;
+					required_cursor_width = -1;
 					should_render = true;
 					case .TAB;
 					array_insert_at(*text_buffer, #char "\t", cursor);
 					cursor += 1;
+					required_cursor_width = -1;
 					should_render = true;
 					case .BACKSPACE;
 					while cursor > 0 && ((text_buffer.data[cursor - 1] & 0xc0) == 0x80) {
@@ -357,6 +412,7 @@ main :: () {
 						array_ordered_remove_by_index(*text_buffer, cursor - 1);
 						cursor -= 1;
 					}
+					required_cursor_width = -1;
 					should_render = true;
 					case .LCTRL; #through;
 					case .RCTRL;
@@ -398,9 +454,11 @@ main :: () {
 					array_insert_at(*text_buffer, byte, xx cursor);
 					cursor += 1;
 				}
+				required_cursor_width = -1;
 				should_render = true;
 				case .MOUSE_BUTTON_DOWN;
 				cursor = clamp(point_to_cursor(*ctx, event.mouse.x, event.mouse.y), 0, text_buffer.count);
+				required_cursor_width = -1;
 				should_render = true;
 			};
 		}

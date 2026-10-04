@@ -398,6 +398,10 @@ SDL_fmod :: (x: float64, y: float64) -> float64 #foreign sdl3;
 		return x*x + y*y;
 	}
 	
+	length :: inline (using point: SDL_FPoint) -> float {
+		return SDL_sqrtf(length_squared(point));
+	}
+	
 	lerp :: inline (a: SDL_FPoint, b: SDL_FPoint, t: float) -> SDL_FPoint {
 		return a + (b - a) * t;
 	}

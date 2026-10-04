@@ -5,6 +5,7 @@ SCROLL_MOD :: 30;
 HARD_LOCK_CHECK :: false;
 
 Visual_Line :: struct {
+	real_line_number: s64;
 	start_byte_offset: s64;
 	length: s64;
 }
@@ -27,6 +28,9 @@ Ctx :: struct {
 	should_render: bool;
 	is_ctrl_held: bool;
 	tab_width: s32 = 8; // Per spaces
+	deltatime: float32;
+	previous_frame_time: u64;
+	current_frame_time: u64;
 }
 
 calculate_vislines :: (using ctx: *Ctx) {
@@ -41,6 +45,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 	before_char: string;
 	digit_width := sdl_char_width(font, #char "9"); // the most wide one. Maybe one day I will calculate max width of all digits.
 	iter := 0;
+	newlines_count := 0;
 	while true {
 #if HARD_LOCK_CHECK {
 			if iter > 1024*10 {
@@ -55,7 +60,8 @@ calculate_vislines :: (using ctx: *Ctx) {
 		}
 		assert(ok != .SOURCE_ILLEGAL, "Can't iterate over text buffer, error on '%': %", slice(sv, 0, 5), ok);
 		if cp == #char "\n" {
-			array_add(*visual_lines, .{line_begin.data - text_buffer.data, sv.data - line_begin.data - 1});
+			array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.data, sv.data - line_begin.data - 1});
+			newlines_count += 1;
 			line_begin = sv;
 			left_space = initial_window_width;
 			continue;
@@ -63,7 +69,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 		adv = measure_char_or_tab(ctx, font, cp);
 		left_space -= adv;
 		if left_space <= 0 && (before_char.data - line_begin.data > 0) {
-			array_add(*visual_lines, .{line_begin.data - text_buffer.data, before_char.data - line_begin.data});
+			array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.data, before_char.data - line_begin.data});
 			line_begin = before_char;
 			sv = before_char;
 			left_space = initial_window_width;
@@ -71,8 +77,8 @@ calculate_vislines :: (using ctx: *Ctx) {
 		}
 	}
 	assert(!hard_locked, "Hard locked at generating visual lines");
-	array_add(*visual_lines, .{line_begin.data - text_buffer.data, sv.data - line_begin.data});
-	line_number_width = (1 + SDL_ceilf(SDL_log10f(xx (visual_lines.count + 1)))) * digit_width;
+	array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.data, sv.data - line_begin.data});
+	line_number_width = (1 + SDL_ceilf(SDL_log10f(xx (newlines_count + 1)))) * digit_width;
 }
 
 draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, color: SDL_Color, text: string) -> (s32, s32) {
@@ -158,7 +164,7 @@ measure_string_with_tab :: (using,except(font,width) ctx: *Ctx, font: *TTF_Font,
 			return width, length;
 		}
 		width += ch_width;
-		length += trailingBytesForUTF8[it] + 1;
+		length += trailingBytesForUTF8[it&0xff] + 1;
 	}
 	return width, length;
 }
@@ -197,25 +203,29 @@ render :: (using ctx: *Ctx) {
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
 	draw_on_left(ctx, 0, tprint("%", render_frame_count));
-	//draw_on_left(ctx, xx (font_height), tprint("visline count = %", visual_lines.count));
-	//draw_on_left(ctx, xx (font_height * 2), tprint("%", text_buffer));
+	draw_on_left(ctx, xx (font_height * 2), tprint("%", cursor));
+	max_real_line_number := 0;
 	for visual_lines {
 		if (xx ((it_index + 1) * font_height) - scroll_interp) < 0 then continue;
 		if (xx (it_index * font_height) - scroll_interp) > xx window_height then break;
 		line: string = ---;
 		line.data = *text_buffer.data[it.start_byte_offset];
 		line.count = it.length;
-		draw_text(renderer, font, 0, xx (it_index * font_height) - scroll_interp, .{0x43, 0x83, 0x43, 0xff}, tprint("%", it_index + 1));
+		if max_real_line_number < it.real_line_number + 1 {
+			draw_text(renderer, font, 0, xx (it_index * font_height) - scroll_interp, .{0x43, 0x83, 0x43, 0xff}, tprint("%", it.real_line_number + 1));
+			max_real_line_number = it.real_line_number + 1;
+		}
 		if line.count <= 0 {
 			continue;
 		}
-		line_width := measure_string_with_tab(ctx, font, line);
-		draw_rect_lines(renderer, .{line_number_width, - scroll_interp + xx (it_index * font_height), xx line_width, xx font_height}, .{0xff, 0x00, 0x00, 0xff});
+		// line_width := measure_string_with_tab(ctx, font, line);
+		// draw_rect_lines(renderer, .{line_number_width, - scroll_interp + xx (it_index * font_height), xx line_width, xx font_height}, .{0xff, 0x00, 0x00, 0xff});
 		draw_fancy_text(ctx, line_number_width, - scroll_interp + xx (it_index * font_height), line);
 		drawed += 1;
 	}
 	draw_on_left(ctx, xx font_height, tprint("%", drawed));
-	fill_rect(renderer, .{cursor_interp.x, cursor_interp.y, 2, xx font_height}, .{0x00, 0xff, 0x00, 0xff});
+	cursor_width := max(2.0, SDL_logf(length_squared(real_cursor_position - cursor_interp)));
+	fill_rect(renderer, .{cursor_interp.x - cursor_width / 2, cursor_interp.y, cursor_width, xx font_height}, .{0x00, 0xff, 0x00, 0xff});
 	SDL_RenderPresent(renderer);
 	render_frame_count += 1;
 	should_render = false;
@@ -284,8 +294,12 @@ main :: () {
 	event: SDL_Event;
 	create_textures(*ctx);
 	should_render = true;
+	previous_frame_time = SDL_GetTicks();
 	SDL_StartTextInput(window);
 	while main_loop := true {
+		current_frame_time := SDL_GetTicks();
+		deltatime = (current_frame_time - previous_frame_time) / 1000.0;
+		previous_frame_time = current_frame_time;
 		while SDL_PollEvent(*event) {
 			if event.type == {
 				case .QUIT;
@@ -305,11 +319,25 @@ main :: () {
 					case .LEFT;
 					if cursor > 0 {
 						cursor -= 1;
+						while cursor > 0 && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
+							cursor -= 1;
+						}
 						should_render = true;
 					}
 					case .RIGHT;
 					if cursor < text_buffer.count {
 						cursor += 1;
+						while cursor < text_buffer.count && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
+							cursor += 1;
+						}
+						should_render = true;
+					}
+					case .UP;
+					if cursor > 0 {
+						should_render = true;
+					}
+					case .DOWN;
+					if cursor < text_buffer.count {
 						should_render = true;
 					}
 					case .RETURN;
@@ -377,13 +405,13 @@ main :: () {
 			};
 		}
 		if SDL_fabsf(scroll - scroll_interp) >= 0.01 {
-			scroll_interp = Math.lerp(scroll_interp, scroll, 0.15);
+			scroll_interp = Math.lerp(scroll_interp, scroll, 15 * deltatime);
 			should_render = true;
 		} else {
 			scroll_interp = scroll;
 		}
 		if length_squared(real_cursor_position - cursor_interp) >= 0.00001 {
-			cursor_interp = lerp(cursor_interp, real_cursor_position, 0.3);
+			cursor_interp = lerp(cursor_interp, real_cursor_position, 32 * deltatime);
 			should_render = true;
 		} else {
 			cursor_interp = real_cursor_position;

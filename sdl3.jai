@@ -313,6 +313,8 @@ SDL_logf :: (x: float32) -> float32 #foreign sdl3;
 SDL_log :: (x: float64) -> float64 #foreign sdl3;
 SDL_log10f :: (x: float32) -> float32 #foreign sdl3;
 SDL_log10 :: (x: float64) -> float64 #foreign sdl3;
+SDL_fmodf :: (x: float32, y: float32) -> float32 #foreign sdl3;
+SDL_fmod :: (x: float64, y: float64) -> float64 #foreign sdl3;
 
 #if ENABLE_TTF {
 	sdl3_ttf :: #system_library "libSDL3_ttf.so";
@@ -390,6 +392,14 @@ SDL_log10 :: (x: float64) -> float64 #foreign sdl3;
 	
 	rect_origin :: inline (rect: SDL_FRect) -> SDL_FPoint {
 		return .{rect.x, rect.y};
+	}
+	
+	length_squared :: inline (using point: SDL_FPoint) -> float {
+		return x*x + y*y;
+	}
+	
+	lerp :: inline (a: SDL_FPoint, b: SDL_FPoint, t: float) -> SDL_FPoint {
+		return a + (b - a) * t;
 	}
 	
 	operator + :: (a: SDL_FRect, b: SDL_FRect) -> SDL_FRect {

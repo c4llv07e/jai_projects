@@ -1,6 +1,10 @@
 // Simple Text Editor
 
-font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
+#if false {
+	font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
+} else {
+	font_path :: "/usr/share/fonts/TTF/liberation/LiberationSans-Regular.ttf";
+}
 SCROLL_MOD :: 30;
 HARD_LOCK_CHECK :: false;
 
@@ -82,17 +86,17 @@ calculate_vislines :: (using ctx: *Ctx) {
 	line_number_width = (1 + SDL_ceilf(SDL_log10f(xx (newlines_count + 1)))) * digit_width;
 }
 
-draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, color: SDL_Color, text: string) -> (s32, s32) {
+draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, color: SDL_Color, text: string) {
         surface: *SDL_Surface = TTF_RenderText_Blended(font, text.data, xx text.count, color);
 	if surface == null {
 		log_error("Can't render text on surface: %", sdl_get_error());
-		return 0, 0;
+		return;
 	}
 	defer SDL_DestroySurface(surface);
 	texture: *SDL_Texture = SDL_CreateTextureFromSurface(renderer, surface);
 	if texture == null {
 		log_error("Can't convert surface to texture: %", sdl_get_error());
-		return 0, 0;
+		return;
 	}
 	defer SDL_DestroyTexture(texture);
 	text_bounds := SDL_FRect.{
@@ -103,9 +107,7 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, colo
 	};
 	if !SDL_RenderTexture(renderer, texture, null, *text_bounds) {
 		log_error("Can't blit texture: %", sdl_get_error());
-		return 0, 0;
 	}
-	return texture.w, texture.h;
 }
 
 draw_fancy_text :: (using ctx: *Ctx, x: float, y: float, text: string, color: SDL_Color = .{0xe3, 0xe3, 0xe3, 0xff}) {
@@ -120,9 +122,9 @@ draw_fancy_text :: (using ctx: *Ctx, x: float, y: float, text: string, color: SD
 			break;
 		}
 		if match != 0 {
-			offset_x, offset_y := draw_text(renderer, font, x, y, color, slice(sv, 0, match));
+			draw_text(renderer, font, x, y, color, slice(sv, 0, match));
+			x += measure_string_with_tab(ctx, font, slice(sv, 0, match));
 			advance(*sv, match);
-			x += offset_x;
 		}
 		while sv.count > 0 && is_any(sv.data[0], special_chars) {
 			if sv.data[0] == {
@@ -207,6 +209,7 @@ render :: (using ctx: *Ctx) {
 	draw_on_left(ctx, xx (font_height * 2), tprint("%", cursor));
 	draw_on_left(ctx, xx (font_height * 3), tprint("%", required_cursor_width));
 	max_real_line_number := 0;
+	fill_rect(renderer, .{0, 0, xx line_number_width, xx window_height}, .{0x10, 0x20, 0x10, 0xff});
 	for visual_lines {
 		if (xx ((it_index + 1) * font_height) - scroll_interp) < 0 then continue;
 		if (xx (it_index * font_height) - scroll_interp) > xx window_height then break;
@@ -225,6 +228,8 @@ render :: (using ctx: *Ctx) {
 		draw_fancy_text(ctx, line_number_width, - scroll_interp + xx (it_index * font_height), line);
 		drawed += 1;
 	}
+	vislines_end_y := xx (visual_lines.count * font_height) - scroll_interp;
+	fill_rect(renderer, .{line_number_width, vislines_end_y, window_width - line_number_width, window_height - vislines_end_y}, .{0x18, 0x18, 0x18, 0xff});
 	draw_on_left(ctx, xx font_height, tprint("%", drawed));
 	cursor_width := max(2.0, SDL_logf(length_squared(real_cursor_position - cursor_interp)));
 	fill_rect(renderer, .{cursor_interp.x - cursor_width / 2, cursor_interp.y, cursor_width, xx font_height}, .{0x00, 0xff, 0x00, 0xff});
@@ -276,7 +281,6 @@ create_textures :: (using ctx: *Ctx) {
 	}
 }
 
-// TODO(c4llv07e): From the end of a file jumps over two lines.
 go_up_line :: (using ctx: *Ctx) {
 	sv := cast(string)text_buffer;
 	first_nl := find_index_from_right(slice(sv, 0, cursor), #char "\n");

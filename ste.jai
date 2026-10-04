@@ -1,7 +1,7 @@
 // Simple Text Editor
 
 font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
-SCROLL_MOD :: 8;
+SCROLL_MOD :: 24;
 
 Visual_Line :: struct {
 	start_byte_offset: s64;
@@ -36,7 +36,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 	hard_locked := true;
 	before_char: string;
 	digit_width := sdl_char_width(font, #char "9"); // the most wide one. Maybe one day I will calculate max width of all digits.
-	for 0..1024 {
+	for 0..(1024*10) {
 		before_char = sv;
 		cp, ok := utf8_next_character(*sv);
 		if ok == .SOURCE_EXHAUSTED {
@@ -50,9 +50,9 @@ calculate_vislines :: (using ctx: *Ctx) {
 			left_space = initial_window_width;
 			continue;
 		}
-		assert(TTF_GetGlyphMetrics(font, cp, null, null, null, null, *adv), "Can't get glyph % info", cp);
+		adv = measure_char_or_tab(ctx, font, cp);
 		left_space -= adv;
-		if left_space <= 0 {
+		if left_space <= 0 && (before_char.data - line_begin.data > 0) {
 			array_add(*visual_lines, .{line_begin.data - text_buffer.data, before_char.data - line_begin.data});
 			line_begin = before_char;
 			sv = before_char;
@@ -94,6 +94,8 @@ draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, colo
 draw_fancy_text :: (using ctx: *Ctx, x: float, y: float, text: string, color: SDL_Color = .{0xe3, 0xe3, 0xe3, 0xff}) {
 	special_chars :: " \t";
 	sv := text;
+	space_width := sdl_char_width(font, #char " ");
+	font_height := TTF_GetFontHeight(font);
 	while true {
 		match := find_index_of_any_from_left(sv, special_chars);
 		if match == -1 {
@@ -108,13 +110,13 @@ draw_fancy_text :: (using ctx: *Ctx, x: float, y: float, text: string, color: SD
 		while sv.count > 0 && is_any(sv.data[0], special_chars) {
 			if sv.data[0] == {
 				case #char " ";
-				rect := SDL_FRect.{SDL_floorf(x), SDL_floorf(y), xx space_texture.w, xx space_texture.h};
+				rect := SDL_FRect.{SDL_floorf(x), SDL_floorf(y), xx space_width, xx font_height};
 				SDL_RenderTexture(renderer, space_texture, null, *rect);
-				x += space_texture.w;
+				x += space_width;
 				case #char "\t";
-				rect := SDL_FRect.{SDL_floorf(x), SDL_floorf(y), xx tab_texture.w, xx tab_texture.h};
+				rect := SDL_FRect.{SDL_floorf(x), SDL_floorf(y), xx (space_width * tab_width), xx font_height};
 				SDL_RenderTexture(renderer, tab_texture, null, *rect);
-				x += tab_texture.w;
+				x += space_width * tab_width;
 				case;
 				log_error("% is in special_chars, but not in switch case to handle them.");
 			}
@@ -132,7 +134,7 @@ offset_to_visline_index :: (using ctx: *Ctx, offset: s64) -> s64 {
 }
 
 measure_char_or_tab :: (using,except(font) ctx: *Ctx, font: *TTF_Font, ch: u32) -> width: s32 {
-	if ch == #char "\t" then return xx tab_texture.w;
+	if ch == #char "\t" then return sdl_char_width(font, #char " ") * tab_width;
 	else return sdl_char_width(font, ch);
 }
 
@@ -158,6 +160,7 @@ draw_on_left :: (using ctx: *Ctx, y: float32, text: string, color: SDL_Color = .
 
 render_frame_count := 0;
 render :: (using ctx: *Ctx) {
+	drawed: s64 = 0;
 	if !should_render {
 		SDL_Delay(1);
 		return;
@@ -169,6 +172,8 @@ render :: (using ctx: *Ctx) {
 	//draw_on_left(ctx, xx (font_height), tprint("visline count = %", visual_lines.count));
 	//draw_on_left(ctx, xx (font_height * 2), tprint("%", text_buffer));
 	for visual_lines {
+		if (xx ((it_index + 1) * font_height) - scroll) < 0 then continue;
+		if (xx (it_index * font_height) - scroll) > xx window_height then break;
 		line: string = ---;
 		line.data = *text_buffer.data[it.start_byte_offset];
 		line.count = it.length;
@@ -179,7 +184,9 @@ render :: (using ctx: *Ctx) {
 		line_width := measure_string_with_tab(ctx, font, line);
 		draw_rect_lines(renderer, .{line_number_width, - scroll + xx (it_index * font_height), xx line_width, xx font_height}, .{0xff, 0x00, 0x00, 0xff});
 		draw_fancy_text(ctx, line_number_width, - scroll + xx (it_index * font_height), line);
+		drawed += 1;
 	}
+	draw_on_left(ctx, xx font_height, tprint("%", drawed));
 	if visual_lines { // Cursor
 		cursor_visline_index := offset_to_visline_index(ctx, cursor);
 		cursor_visline := visual_lines[cursor_visline_index];
@@ -243,10 +250,19 @@ main :: () {
 	using ctx := Ctx.{};
 	initial_width :: 800;
 	initial_height :: 600;
+	args := get_command_line_arguments();
 	check_sdl(SDL_Init(.VIDEO), "Can't init SDL");
 	check_sdl(TTF_Init(), "Can't init font engine");
 	check_sdl(SDL_CreateWindowAndRenderer("ste", initial_width, initial_height, .RESIZABLE, *window, *renderer), "Can't create SDL output");
 	font = TTF_OpenFont(font_path, 16);
+	if args.count > 1 {
+		content, ok := read_entire_file(args[1], zero_terminated = true);
+		if !ok {
+			log_error("Can't open file %", args[1]);
+		} else {
+			array_add(*text_buffer, ..cast([]u8)content);
+		}
+	}
 	event: SDL_Event;
 	create_textures(*ctx);
 	should_render = true;
@@ -338,6 +354,7 @@ main :: () {
 	}
 }
 
+#import "File";
 Math :: #import "Math";
 #import,file "Unicode.jai";
 #import,file "sdl3.jai";

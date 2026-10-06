@@ -260,6 +260,11 @@ SDL_GetWindowSize :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sd
 SDL_GetWindowSizeInPixels :: (window: *SDL_Window, w: *s32, h: *s32) -> bool #foreign sdl3;
 SDL_GetModState :: () -> SDL_Keymod #foreign sdl3;
 SDL_SetRenderVSync :: (renderer: *SDL_Renderer, vsync: s32) -> bool #foreign sdl3;
+SDL_SetClipboardText :: (text: *u8) -> bool #foreign sdl3;
+SDL_HasClipboardText :: () -> bool #foreign sdl3;
+SDL_GetClipboardText :: () -> *u8 #foreign sdl3;
+SDL_malloc :: (size: u64) -> *void #foreign sdl3;
+SDL_free :: (mem: *void) #foreign sdl3;
 SDL_PollEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
 SDL_WaitEvent :: (event: *SDL_Event) -> bool #foreign sdl3;
 SDL_WaitEventTimeout :: (event: *SDL_Event, timeoutMS: s32) -> bool #foreign sdl3;
@@ -417,6 +422,13 @@ SDL_fmod :: (x: float64, y: float64) -> float64 #foreign sdl3;
 	
 	lerp :: inline (a: SDL_FPoint, b: SDL_FPoint, t: float) -> SDL_FPoint {
 		return a + (b - a) * t;
+	}
+	
+	operator == :: (a: SDL_FPoint, b: SDL_FPoint) -> bool {
+		// I know I shouldn't use it because of interpolation problems, but
+		// It is needed for if m != n then m = n. There should be no
+		// problems with that.
+		return a.x == b.x && a.y == b.y;
 	}
 	
 	operator + :: (a: SDL_FRect, b: SDL_FRect) -> SDL_FRect {

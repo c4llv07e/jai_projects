@@ -90,7 +90,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 	}
 	assert(!hard_locked, "Hard locked at generating visual lines");
 	array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.data, sv.data - line_begin.data});
-	line_number_width = (1 + SDL_ceilf(SDL_log10f(xx (newlines_count + 1)))) * digit_width;
+	line_number_width = (1 + SDL_ceilf(SDL_log10f(xx (newlines_count + 2)))) * digit_width;
 }
 
 draw_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, color: SDL_Color, text: string) {
@@ -197,7 +197,7 @@ update_real_cursor_position :: (using ctx: *Ctx) {
 			width = 0;
 		real_cursor_position = .{line_number_width + xx width, xx ((cursor_visline_index * font_height) - scroll_interp)};
 	} else {
-		real_cursor_position = .{0.0, 0.0};
+		real_cursor_position = .{line_number_width, - scroll_interp};
 	}
 }
 
@@ -249,9 +249,14 @@ render :: (using ctx: *Ctx) {
 	fill_rect(renderer, linecol_panel_rect, .{0x20, 0x30, 0x20, 0xff});
 	draw_rect_lines(renderer, linecol_panel_rect, .{0x30, 0x40, 0x30, 0xff});
 	vislinenum := offset_to_visline_index(ctx, cursor);
-	visline := visual_lines[vislinenum];
-	col := utf8_count_codepoints(slice(cast(string)text_buffer, visline.start_byte_offset, cursor - visline.start_byte_offset));
-	draw_text(renderer, font, linecol_panel_rect.x + linecol_padding, linecol_panel_rect.y + linecol_padding, .{0xe3, 0xe3, 0xe3, 0xff}, tprint("Ln: %, Col: %", visline.real_line_number + 1, col + 1));
+	col: s64 = 0;
+	linenum: s64 = 0;
+	if vislinenum != -1 { 
+		visline := visual_lines[vislinenum];
+		col = utf8_count_codepoints(slice(cast(string)text_buffer, visline.start_byte_offset, cursor - visline.start_byte_offset));
+		linenum = visline.real_line_number;
+	}
+	draw_text(renderer, font, linecol_panel_rect.x + linecol_padding, linecol_panel_rect.y + linecol_padding, .{0xe3, 0xe3, 0xe3, 0xff}, tprint("Ln: %, Col: %", linenum + 1, col + 1));
 	SDL_RenderPresent(renderer);
 	render_frame_count += 1;
 	should_render = false;
@@ -389,6 +394,19 @@ go_right :: (using ctx: *Ctx) {
 	}
 }
 
+remove_previous_char :: (using ctx: *Ctx) {
+	while cursor > 0 && ((text_buffer.data[cursor - 1] & 0xc0) == 0x80) {
+		cursor -= 1;
+		array_ordered_remove_by_index(*text_buffer, cursor);
+	}
+	if cursor > 0 {
+		array_ordered_remove_by_index(*text_buffer, cursor - 1);
+		cursor -= 1;
+	}
+	required_cursor_width = -1;
+	should_render = true;
+}
+
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 	if command == {
 		case "go_up_line";
@@ -403,6 +421,8 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		go_left(ctx);
 		case "go_right";
 		go_right(ctx);
+		case "remove_previous_char";
+		remove_previous_char(ctx);
 		case;
 		log_error("unknown command %", command);
 		return false;
@@ -478,17 +498,6 @@ main :: () {
 					}
 				}
 				if event.key.scancode == {
-					case .BACKSPACE;
-					while cursor > 0 && ((text_buffer.data[cursor - 1] & 0xc0) == 0x80) {
-						cursor -= 1;
-						array_ordered_remove_by_index(*text_buffer, cursor);
-					}
-					if cursor > 0 {
-						array_ordered_remove_by_index(*text_buffer, cursor - 1);
-						cursor -= 1;
-					}
-					required_cursor_width = -1;
-					should_render = true;
 					case .LCTRL; #through;
 					case .RCTRL;
 					is_ctrl_held = event.key.down;

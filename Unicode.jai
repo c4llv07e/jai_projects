@@ -29,7 +29,7 @@ utf8_step_back :: (sv: string, cursor: *s64, loc := #caller_location) {
 	}
 }
 
-utf8_advance :: (s: *string, amount: s64) {
+utf8_advance :: (s: *string, amount: s64 = 1) {
 	Basic.assert(amount >= 0);
 	while amount > 0 {
 		utf8_next_character(s);
@@ -50,6 +50,17 @@ utf8_find_index_from_right :: (s: string, cp: u32) -> s64 {
 		if it == cp then last_index = it_index;
 	}
 	return last_index;
+}
+
+utf8_count_codepoints :: (s: string) -> s64 {
+	count: s64 = 0;
+	sv := s;
+	while sv {
+		cp, ok := utf8_next_character(*sv);
+		if ok != .CONVERSION_OK break;
+		count += 1;
+	}
+	return count;
 }
 
 // end of c4llv07e functions ===================================================

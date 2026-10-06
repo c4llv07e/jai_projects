@@ -30,6 +30,12 @@ SDL_EventType :: enum u32 {
 SDL_KeyboardID :: u32;
 SDL_WindowID :: u32;
 
+SDL_Keycode :: enum u32 {
+	RETURN :: 0xd;
+	BACKSPACE :: 0x8;
+	TAB :: 0x9;
+	SPACE :: 0x20;
+}
 SDL_Scancode :: enum u32 {
 	F :: 9;
         I :: 12;
@@ -53,7 +59,6 @@ SDL_Scancode :: enum u32 {
 	RALT :: 230;
 	RGUI :: 231;
 };
-SDL_Keycode :: u32;
 SDL_Keymod :: enum u16 {
         NONE :: 0x0000;
         LSHIFT :: 0x0001;
@@ -284,6 +289,7 @@ SDL_DestroySurface :: (surface: *SDL_Surface) #foreign sdl3;
 SDL_RenderTexture :: (renderer: *SDL_Renderer, texture: *SDL_Texture, srcrect: *SDL_FRect, dstrect: *SDL_FRect) -> bool #foreign sdl3;
 SDL_DestroyTexture :: (texture: *SDL_Texture) #foreign sdl3;
 SDL_GetScancodeFromName :: (name: *u8) -> SDL_Scancode #foreign sdl3;
+SDL_GetKeyFromName :: (name: *u8) -> SDL_Keycode #foreign sdl3;
 SDL_GetError :: () -> *u8 #foreign sdl3;
 SDL_Delay :: (ms: u32) #foreign sdl3;
 SDL_GetVersion :: () -> s32 #foreign sdl3;
@@ -350,6 +356,13 @@ SDL_fmod :: (x: float64, y: float64) -> float64 #foreign sdl3;
 		memcpy(tmp_data.data, name.data, name.count);
 		tmp_data[name.count] = 0;
 		return SDL_GetScancodeFromName(tmp_data.data);
+	}
+	
+	sdl_keycode_from_string :: (name: string) -> SDL_Keycode {
+		tmp_data: [32]u8;
+		memcpy(tmp_data.data, name.data, name.count);
+		tmp_data[name.count] = 0;
+		return SDL_GetKeyFromName(tmp_data.data);
 	}
 	
 	fill_rect :: (renderer: *SDL_Renderer, rect: SDL_FRect, color: SDL_Color) {

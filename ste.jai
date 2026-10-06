@@ -1,5 +1,10 @@
 // Simple Text Editor
 
+// TODO(c4llv07e): Add keybinds.jai support.
+// TODO(c4llv07e): Add save and open dialogs.
+// TODO(c4llv07e): Add selection.
+// TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
+
 #if false {
 	font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
 } else {
@@ -15,6 +20,8 @@ Visual_Line :: struct {
 }
 
 Ctx :: struct {
+	root_keybind: Keybind;
+	current_keybind: *Keybind;
 	window: *SDL_Window;
 	renderer: *SDL_Renderer;
 	font: *TTF_Font;
@@ -205,11 +212,9 @@ render :: (using ctx: *Ctx) {
 	font_height := TTF_GetFontHeight(font);
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
-	draw_on_left(ctx, 0, tprint("%", render_frame_count));
-	draw_on_left(ctx, xx (font_height * 2), tprint("%", cursor));
-	draw_on_left(ctx, xx (font_height * 3), tprint("%", required_cursor_width));
 	max_real_line_number := 0;
 	fill_rect(renderer, .{0, 0, xx line_number_width, xx window_height}, .{0x10, 0x20, 0x10, 0xff});
+	draw_rect_lines(renderer, .{0, 0, xx line_number_width, xx window_height}, .{0x20, 0x30, 0x20, 0xff});
 	for visual_lines {
 		if (xx ((it_index + 1) * font_height) - scroll_interp) < 0 then continue;
 		if (xx (it_index * font_height) - scroll_interp) > xx window_height then break;
@@ -230,9 +235,23 @@ render :: (using ctx: *Ctx) {
 	}
 	vislines_end_y := xx (visual_lines.count * font_height) - scroll_interp;
 	fill_rect(renderer, .{line_number_width, vislines_end_y, window_width - line_number_width, window_height - vislines_end_y}, .{0x18, 0x18, 0x18, 0xff});
-	draw_on_left(ctx, xx font_height, tprint("%", drawed));
+	if scroll_interp < 0 then fill_rect(renderer, .{line_number_width, 0, window_width - line_number_width, -scroll_interp}, .{0x18, 0x18, 0x18, 0xff});
+	{ // Debug
+		draw_on_left(ctx, 0, tprint("%", render_frame_count));
+		draw_on_left(ctx, xx (font_height * 2), tprint("%", cursor));
+		draw_on_left(ctx, xx (font_height * 3), tprint("%", required_cursor_width));
+		draw_on_left(ctx, xx font_height, tprint("%", drawed));
+	}
 	cursor_width := max(2.0, SDL_logf(length_squared(real_cursor_position - cursor_interp)));
 	fill_rect(renderer, .{cursor_interp.x - cursor_width / 2, cursor_interp.y, cursor_width, xx font_height}, .{0x00, 0xff, 0x00, 0xff});
+	linecol_padding :: 2;
+	linecol_panel_rect := SDL_FRect.{line_number_width, xx (window_height - font_height - linecol_padding * 2), xx (window_width - line_number_width), xx (font_height + linecol_padding * 2)};
+	fill_rect(renderer, linecol_panel_rect, .{0x20, 0x30, 0x20, 0xff});
+	draw_rect_lines(renderer, linecol_panel_rect, .{0x30, 0x40, 0x30, 0xff});
+	vislinenum := offset_to_visline_index(ctx, cursor);
+	visline := visual_lines[vislinenum];
+	col := utf8_count_codepoints(slice(cast(string)text_buffer, visline.start_byte_offset, cursor - visline.start_byte_offset));
+	draw_text(renderer, font, linecol_panel_rect.x + linecol_padding, linecol_panel_rect.y + linecol_padding, .{0xe3, 0xe3, 0xe3, 0xff}, tprint("Ln: %, Col: %", visline.real_line_number + 1, col + 1));
 	SDL_RenderPresent(renderer);
 	render_frame_count += 1;
 	should_render = false;
@@ -284,6 +303,7 @@ create_textures :: (using ctx: *Ctx) {
 go_up_line :: (using ctx: *Ctx) {
 	sv := cast(string)text_buffer;
 	first_nl := find_index_from_right(slice(sv, 0, cursor), #char "\n");
+	should_render = true;
 	if first_nl <= 0 {
 		cursor = 0;
 		return;
@@ -303,6 +323,7 @@ go_up_line :: (using ctx: *Ctx) {
 go_down_line :: (using ctx: *Ctx) {
 	sv := cast(string)text_buffer;
 	first_nl := find_index_from_left(slice(sv, cursor, sv.count), #char "\n");
+	should_render = true;
 	if first_nl < 0 {
 		cursor = sv.count;
 		return;
@@ -327,6 +348,76 @@ update_required_cursor_width :: inline (using ctx: *Ctx) {
 	required_cursor_width = measure_string_with_tab(ctx, font, slice(sv, line_start + 1, cursor - line_start - 1));
 }
 
+insert_char_u8 :: (using ctx: *Ctx, $char: u8) {
+	array_insert_at(*text_buffer, char, cursor);
+	cursor += 1;
+	required_cursor_width = -1;
+	should_render = true;
+}
+
+go_left :: (using ctx: *Ctx) {
+	if cursor > 0 {
+		cursor -= 1;
+		while cursor > 0 && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
+			cursor -= 1;
+		}
+		required_cursor_width = -1;
+		should_render = true;
+	}
+}
+
+go_right :: (using ctx: *Ctx) {
+	if cursor < text_buffer.count {
+		cursor += 1;
+		while cursor < text_buffer.count && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
+			cursor += 1;
+		}
+		required_cursor_width = -1;
+		should_render = true;
+	}
+}
+
+#if false {
+	go_left_word :: (using ctx: *Ctx) {
+		if cursor > 0 {
+			cp, ok := utf8_step_back(cast(string)text_buffer, *cursor);
+			should_render = true;
+			while cursor > 0 && is_alpha(cp) && is_digit(text_buffer[cursor]) {
+				cursor -= 1;
+			}
+		}
+	}
+}
+
+handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
+	if command == {
+		case "go_up_line";
+		go_up_line(ctx);
+		case "go_down_line";
+		go_down_line(ctx);
+		case "insert_tab";
+		insert_char_u8(ctx, #char "\t");
+		case "insert_newline";
+		insert_char_u8(ctx, #char "\n");
+		case "go_left";
+		go_left(ctx);
+		case "go_right";
+		go_right(ctx);
+		case;
+		log_error("unknown command %", command);
+		return false;
+	}
+	return true;
+}
+
+keybind_mods_from_mod :: (mod: SDL_Keymod) -> Modifier {
+	res: Modifier;
+	if mod & .CTRL then res |= .CTRL;
+	if mod & .ALT then res |= .ALT;
+	if mod & .SHIFT then res |= .SHIFT;
+	return res;
+}
+
 main :: () {
 	using ctx := Ctx.{};
 	initial_width :: 800;
@@ -335,6 +426,9 @@ main :: () {
 	check_sdl(SDL_Init(.VIDEO), "Can't init SDL");
 	check_sdl(TTF_Init(), "Can't init font engine");
 	check_sdl(SDL_CreateWindowAndRenderer("ste", initial_width, initial_height, .RESIZABLE, *window, *renderer), "Can't create SDL output");
+	SDL_SetRenderVSync(renderer, 1);
+	ctx.root_keybind = generate_keybinds("./keybinds.conf");
+	ctx.current_keybind = *ctx.root_keybind;
 	font = TTF_OpenFont(font_path, 16);
 	if args.count > 1 {
 		content, ok := read_entire_file(args[1], zero_terminated = true);
@@ -368,45 +462,22 @@ main :: () {
 				window_height = event.window.data2;
 				should_render = true;
 				case .KEY_DOWN;
+				keybind_mods := keybind_mods_from_mod(event.key.mod);
+				next_keybind := walk_key(current_keybind, event.key.key, keybind_mods);
+				if next_keybind == null {
+					if current_keybind != *root_keybind {
+						log_error("unknown keybind (%)-(%)", keybind_mods, event.key.key);
+					}
+					current_keybind = *root_keybind;
+				} else {
+					if next_keybind.command {
+						handle_command(*ctx, next_keybind.command);
+						current_keybind = *root_keybind;
+					} else {
+						current_keybind = next_keybind;
+					}
+				}
 				if event.key.scancode == {
-					case .LEFT;
-					if cursor > 0 {
-						cursor -= 1;
-						while cursor > 0 && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
-							cursor -= 1;
-						}
-						required_cursor_width = -1;
-						should_render = true;
-					}
-					case .RIGHT;
-					if cursor < text_buffer.count {
-						cursor += 1;
-						while cursor < text_buffer.count && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
-							cursor += 1;
-						}
-						required_cursor_width = -1;
-						should_render = true;
-					}
-					case .UP;
-					if cursor > 0 {
-						go_up_line(*ctx);
-						should_render = true;
-					}
-					case .DOWN;
-					if cursor < text_buffer.count {
-						go_down_line(*ctx);
-						should_render = true;
-					}
-					case .RETURN;
-					array_insert_at(*text_buffer, #char "\n", cursor);
-					cursor += 1;
-					required_cursor_width = -1;
-					should_render = true;
-					case .TAB;
-					array_insert_at(*text_buffer, #char "\t", cursor);
-					cursor += 1;
-					required_cursor_width = -1;
-					should_render = true;
 					case .BACKSPACE;
 					while cursor > 0 && ((text_buffer.data[cursor - 1] & 0xc0) == 0x80) {
 						cursor -= 1;
@@ -481,11 +552,14 @@ main :: () {
 		if should_render {
 			calculate_vislines(*ctx);
 			render(*ctx);
+		} else {
+			SDL_Delay(1);
 		}
 		reset_temporary_storage();
 	}
 }
 
+#import,file "keybinds.jai" (SDL_Keycode, sdl_keycode_from_string);
 #import "File";
 Math :: #import "Math";
 #import,file "Unicode.jai";

@@ -501,6 +501,22 @@ paste_text :: (using ctx: *Ctx) {
 	should_render = true;
 }
 
+go_line_beginning :: (using ctx: *Ctx) {
+	if cursor <= 0 return;
+	cursor -= 1;
+	should_render = true;
+	required_cursor_width = -1;
+	while cursor > 0 && text_buffer[cursor] != #char "\n" cursor -= 1;
+	if text_buffer[cursor] == #char "\n" cursor += 1;
+}
+
+go_line_end :: (using ctx: *Ctx) {
+	if cursor >= text_buffer.count return;
+	should_render = true;
+	required_cursor_width = -1;
+	while cursor < text_buffer.count && text_buffer[cursor] != #char "\n" cursor += 1;
+}
+
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 	if command == {
 		case "go_up_line";
@@ -523,6 +539,10 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		copy_selection(ctx);
 		case "paste_text";
 		paste_text(ctx);
+		case "go_line_beginning";
+		go_line_beginning(ctx);
+		case "go_line_end";
+		go_line_end(ctx);
 		case;
 		log_error("unknown command %", command);
 		return false;

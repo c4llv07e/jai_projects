@@ -688,7 +688,7 @@ main :: () {
 			scroll_interp = scroll;
 		}
 		if length_squared(real_cursor_position - cursor_interp) >= 0.00001 {
-			cursor_interp = lerp(cursor_interp, real_cursor_position, 32 * deltatime);
+			cursor_interp = lerp(cursor_interp, real_cursor_position, 64 * deltatime);
 			should_render = true;
 		} else {
 			if cursor_interp != real_cursor_position then should_render = true;

@@ -35,6 +35,7 @@ Ctx :: struct {
 	cursor_interp: SDL_FPoint;
 	real_cursor_position: SDL_FPoint;
 	text_buffer: [..]u8;
+	text_buffers: [..][..]u8; // Because I am too lazy to do proper abstraction over text editing code.
 	scroll: float32;
 	scroll_interp: float32;
 	line_number_width: float32;
@@ -517,7 +518,17 @@ go_line_end :: (using ctx: *Ctx) {
 	while cursor < text_buffer.count && text_buffer[cursor] != #char "\n" cursor += 1;
 }
 
+open_file_dialog :: (using ctx: *Ctx) {
+	array_add(*text_buffers, text_buffer);
+	array_reset(*text_buffer);
+	cursor = 0;
+	selection_mark = 0;
+	should_render = true;
+}
+
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
+	// I know what you think, but I'm doing it so I can do more than just
+	// calling existing functions there.
 	if command == {
 		case "go_up_line";
 		go_up_line(ctx);
@@ -543,6 +554,8 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		go_line_beginning(ctx);
 		case "go_line_end";
 		go_line_end(ctx);
+		case "open_file_dialog";
+		open_file_dialog(ctx);
 		case;
 		log_error("unknown command %", command);
 		return false;

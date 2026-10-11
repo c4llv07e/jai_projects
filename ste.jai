@@ -490,6 +490,22 @@ copy_selection :: (using ctx: *Ctx) {
 	copy_to_clipboard(slice(cast(string)text_buffer, from, to - from));
 }
 
+cut_selection :: (using ctx: *Ctx) {
+	if cursor == selection_mark return;
+	from := min(cursor, selection_mark);
+	to := max(cursor, selection_mark);
+	copy_to_clipboard(slice(cast(string)text_buffer, from, to - from));
+	if cursor > from {
+		cursor = from;
+	}
+	if selection_mark > from {
+		selection_mark = from;
+	}
+	memcpy(*text_buffer[from], *text_buffer[to], text_buffer.count - to);
+	text_buffer.count -= to - from;
+	should_render = true;
+}
+
 paste_text :: (using ctx: *Ctx) {
 	if !SDL_HasClipboardText() return;
 	cstr := SDL_GetClipboardText();
@@ -559,6 +575,11 @@ file_dialog_enter :: (using ctx: *Ctx) {
 	should_render = true;
 }
 
+swap_mark_with_cursor :: (using ctx: *Ctx) {
+	Swap(*cursor, *selection_mark);
+	should_render = true;
+}
+
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 	// I know what you think, but I'm doing it so I can do more than just
 	// calling existing functions there.
@@ -579,6 +600,10 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		remove_previous_char(ctx);
 		case "set_mark";
 		set_mark(ctx);
+		case "swap_mark_with_cursor";
+		swap_mark_with_cursor(ctx);
+		case "cut_selection";
+		cut_selection(ctx);
 		case "copy_selection";
 		copy_selection(ctx);
 		case "paste_text";

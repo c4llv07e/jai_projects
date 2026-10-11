@@ -3,6 +3,8 @@
 // TODO(c4llv07e): Add save and open dialogs.
 // TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
 // TODO(c4llv07e): array_insert_at accepts only one byte at a time, we need faster function to insert text.
+// TODO(c4llv07e): Layered keybinds so file prompt will have only "return" keybind but will work the same as
+//                 in any text buffer.
 
 // NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
 
@@ -21,7 +23,8 @@ Visual_Line :: struct {
 }
 
 Ctx :: struct {
-	root_keybind: Keybind;
+	keybind_root: Keybind_Root;
+	modes: [..]s64;
 	current_keybind: *Keybind;
 	window: *SDL_Window;
 	renderer: *SDL_Renderer;
@@ -249,6 +252,7 @@ render :: (using ctx: *Ctx) {
 		draw_on_left(ctx, xx (font_height * 2), tprint("%", cursor));
 		draw_on_left(ctx, xx (font_height * 3), tprint("%", required_cursor_width));
 		draw_on_left(ctx, xx (font_height * 4), tprint("%", font_height));
+		draw_on_left(ctx, xx (font_height * 5), tprint("%", ctx.modes));
 	}
 	static_cursor_width := max(1.0, font_height / 8.0);
 	cursor_width := max(static_cursor_width, SDL_logf(length_squared(real_cursor_position - cursor_interp)));
@@ -519,8 +523,37 @@ go_line_end :: (using ctx: *Ctx) {
 }
 
 open_file_dialog :: (using ctx: *Ctx) {
+	// Theoretically you could open file dialog inside another file dialog. Don't know if
+	// we should prevent this.
 	array_add(*text_buffers, text_buffer);
 	array_reset(*text_buffer);
+	file_dialog_index := find_mode_index(ctx.keybind_root, "file_dialog");
+	if file_dialog_index != -1 {
+		if !is_mode_enabled(ctx.modes, file_dialog_index) {
+			array_add(*ctx.modes, file_dialog_index);
+		}
+	}
+	cursor = 0;
+	selection_mark = 0;
+	should_render = true;
+}
+
+file_dialog_enter :: (using ctx: *Ctx) {
+	filepath := copy_string(cast(string)text_buffer);
+	defer free(filepath);
+	// Maybe should trim first.
+	// Also, need to check if text_buffer is actually a file dialog somehow.
+	array_reset(*text_buffer);
+	content, exists := read_entire_file(filepath);
+	if !exists {
+		log_error("Can't open file '%'", filepath);
+		content = copy_string("");
+	}
+	array_add(*text_buffer, ..cast([]u8)content);
+	file_dialog_index := find_mode_index(ctx.keybind_root, "file_dialog");
+	if file_dialog_index != -1 {
+		array_ordered_remove_by_value(*ctx.modes, file_dialog_index);
+	}
 	cursor = 0;
 	selection_mark = 0;
 	should_render = true;
@@ -556,6 +589,8 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		go_line_end(ctx);
 		case "open_file_dialog";
 		open_file_dialog(ctx);
+		case "enter_path";
+		file_dialog_enter(ctx);
 		case;
 		log_error("unknown command %", command);
 		return false;
@@ -584,8 +619,9 @@ main :: () {
 	if args.count > 0 {
 		program_path = path_strip_filename(args[0]);
 	}
-	ctx.root_keybind = generate_keybinds(tprint("%1%2", program_path, "keybinds.conf"));
-	ctx.current_keybind = *ctx.root_keybind;
+	ctx.keybind_root = generate_keybinds(tprint("%1%2", program_path, "keybinds.conf"));
+	array_add(*ctx.modes, 0);
+	ctx.current_keybind = *ctx.keybind_root.root;
 	font = TTF_OpenFont(font_path, 16);
 	if args.count > 1 {
 		content, ok := read_entire_file(args[1], zero_terminated = true);
@@ -620,16 +656,17 @@ main :: () {
 				should_render = true;
 				case .KEY_DOWN;
 				keybind_mods := keybind_mods_from_mod(event.key.mod);
-				next_keybind := walk_key(current_keybind, event.key.key, keybind_mods);
+				next_keybind := walk_key(current_keybind, event.key.key, keybind_mods, ctx.modes);
 				if next_keybind == null {
-					if current_keybind != *root_keybind {
+					if current_keybind != *keybind_root.root {
 						log_error("unknown keybind (%)-(%)", keybind_mods, event.key.key);
 					}
-					current_keybind = *root_keybind;
+					current_keybind = *keybind_root.root;
 				} else {
-					if next_keybind.command {
-						handle_command(*ctx, next_keybind.command);
-						current_keybind = *root_keybind;
+					command, exists := check_keybind_leaf(next_keybind, ctx.modes);
+					if exists {
+						handle_command(*ctx, command);
+						current_keybind = *keybind_root.root;
 					} else {
 						current_keybind = next_keybind;
 					}

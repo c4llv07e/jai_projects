@@ -122,6 +122,13 @@ check_keybind_leaf :: (keybind: *Keybind, mode_indexes: []s64) -> command: strin
 	return "", false;
 }
 
+is_mode_enabled :: (modes: []s64, mode: s64) -> bool {
+	for modes {
+		if it == mode return true;
+	}
+	return false;
+}
+
 find_mode_index :: (root: Keybind_Root, name: string) -> s64 {
 	for root.modes {
 		if it == name {

@@ -16,8 +16,9 @@ main :: () {
 	print("keybinds = %\n", root);
 	current_keybind := *root.root;
 	keymods := KeyMod.[.{.X, .CTRL}, .{.F, .CTRL}];
-	// Highlest to lowest priority. In most cases should be closed with the default mode ("-").
-	modes := string.["file_dialog", "-"];
+	// Lowest to highest priority, so it would be easier to add and remove temporary modes.
+	// In most cases should start with the default mode ("-").
+	modes := string.["-", "file_dialog"];
 	mode_indexes := calculate_modes_indexes(root, modes);
 	log("mode_indexes: %", mode_indexes);
 	for keymod: keymods {

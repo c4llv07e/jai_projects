@@ -103,7 +103,7 @@ calculate_modes_indexes :: (root: Keybind_Root, mode_names: []string) -> [..]s64
 }
 
 walk_key :: (keybind: *Keybind, key: key_type, mod: Modifier, mode_indexes: []s64) -> *Keybind {
-	for mode: mode_indexes {
+	for < mode: mode_indexes {
 		for * next: keybind.next {
 			if (next.mask & (1 << mode)) == 0 continue;
 			if next.mod == mod && next.key == key {
@@ -115,7 +115,7 @@ walk_key :: (keybind: *Keybind, key: key_type, mod: Modifier, mode_indexes: []s6
 }
 
 check_keybind_leaf :: (keybind: *Keybind, mode_indexes: []s64) -> command: string, ok: bool {
-	for mode_index: mode_indexes {
+	for < mode_index: mode_indexes {
 		if keybind.commands.count <= mode_index continue;
 		if keybind.commands[mode_index].count > 0 return keybind.commands[mode_index], true;
 	}
@@ -239,6 +239,8 @@ generate_keybinds :: (filepath: string) -> Keybind_Root {
 	}
 	return root;
 }
+
+#scope_file
 
 Math :: #import "Math";
 #import "Text_File_Handler";

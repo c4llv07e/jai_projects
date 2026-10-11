@@ -2,11 +2,11 @@
 
 // TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
 // TODO(c4llv07e): More keybinds for text movement.
-// TODO(c4llv07e): Follow cursor on input.
 // TODO(c4llv07e): ring buffer Undo-redo.
 // TODO(c4llv07e): Profile everything.
 // TODO(c4llv07e): Selection mark animations.
 // TODO(c4llv07e): Store buffer modification in undo ring
+// TODO(c4llv07e): Store font_height as a variable and don't query it each time.
 
 // NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
 
@@ -103,13 +103,27 @@ insert_text_no_undo :: (using ctx: *Ctx, tb: *Text_Buffer, content: string, posi
 	required_cursor_width = -1;
 }
 
+update_cursor_scroll :: (using ctx: *Ctx) {
+	cursor_visline := offset_to_visline_index(ctx, cursor);
+	if cursor_visline == -1 {
+		// Strange, but ok.
+		return;
+	}
+	font_height := TTF_GetFontHeight(font);
+	cursor_height := (cursor_visline * font_height);
+	if cursor_height < xx scroll || cursor_height > xx scroll + window_height {
+		scroll = xx (cursor_height - (window_height / 2));
+	}
+}
+
 insert_text :: (using ctx: *Ctx, tb: *Text_Buffer, content: string, position: s64, undo_group: Undo_Group) {
-	// NOTE(c4llv07e): Move cursor on input here.
 	insert_text_no_undo(ctx, tb, content, position);
 	copy_string(content);
 	arr: [..]u8;
 	array_copy(*arr, cast([]u8)content);
 	undo_push_op(ctx, tb, .{type = .Insert, group = undo_group, pos = position, data = arr});
+	calculate_vislines(ctx);
+	update_cursor_scroll(ctx);
 }
 
 delete_text_no_undo :: (using ctx: *Ctx, tb: *Text_Buffer, position: s64, length: s64) {
@@ -117,8 +131,8 @@ delete_text_no_undo :: (using ctx: *Ctx, tb: *Text_Buffer, position: s64, length
 	assert(tb.buffer.count >= position + length, "Can't remove text outside of the text buffer");
 	if tb.buffer.count > position + length {
 		memcpy(*tb.buffer[position], *tb.buffer[position + length], tb.buffer.count - position - length);
-		array_resize(*tb.buffer, tb.buffer.count - length);
 	}
+	array_resize(*tb.buffer, tb.buffer.count - length);
 	if cursor >= (position + length) then cursor -= length;
 	else if cursor >= position then cursor = position;
 	if selection_mark >= (position + length) then selection_mark -= length;
@@ -525,6 +539,7 @@ go_up_line :: (using ctx: *Ctx) {
 	}
 	second_width, length := measure_string_with_tab(ctx, font, slice(sv, second_nl + 1, first_nl - second_nl - 1), xx required_cursor_width);
 	cursor = second_nl + 1 + xx length;
+	update_cursor_scroll(ctx);
 }
 
 go_down_line :: (using ctx: *Ctx) {
@@ -547,6 +562,7 @@ go_down_line :: (using ctx: *Ctx) {
 	}
 	second_width, length := measure_string_with_tab(ctx, font, slice(sv, first_nl + 1, second_nl - first_nl - 1), xx required_cursor_width);
 	cursor = first_nl + 1 + xx length;
+	update_cursor_scroll(ctx);
 }
 
 update_required_cursor_width :: inline (using ctx: *Ctx) {

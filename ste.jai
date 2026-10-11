@@ -1,13 +1,12 @@
 // Simple Text Editor
 
-// TODO(c4llv07e): Separate insert_text and delete_text functions with (no_undo variation).
 // TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
-// TODO(c4llv07e): array_insert_at accepts only one byte at a time, we need faster function to insert text.
 // TODO(c4llv07e): More keybinds for text movement.
 // TODO(c4llv07e): Follow cursor on input.
 // TODO(c4llv07e): ring buffer Undo-redo.
 // TODO(c4llv07e): Profile everything.
 // TODO(c4llv07e): Selection mark animations.
+// TODO(c4llv07e): Store buffer modification in undo ring
 
 // NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
 
@@ -85,6 +84,53 @@ Ctx :: struct {
 	deltatime: float32;
 	previous_frame_time: u64;
 	current_frame_time: u64;
+}
+
+insert_text_no_undo :: (using ctx: *Ctx, tb: *Text_Buffer, content: string, position: s64) {
+	assert(position >= 0, "Can't insert text into negative position");
+	assert(tb.buffer.count >= position, "Tried to insert text out of bounds");
+	if tb.immutable_prefix_size > position {
+		return;
+	}
+	array_resize(*tb.buffer, tb.buffer.count + content.count);
+	// ------p-----------------e
+	// ------p=====c-----------------e
+	memcpy(*tb.buffer.data[position + content.count], *tb.buffer.data[position], tb.buffer.count - position);
+	memcpy(*tb.buffer.data[position], *content.data[0], content.count);
+	if cursor >= position then cursor += content.count;
+	if selection_mark >= position then selection_mark += content.count;
+	should_render = true;
+	required_cursor_width = -1;
+}
+
+insert_text :: (using ctx: *Ctx, tb: *Text_Buffer, content: string, position: s64, undo_group: Undo_Group) {
+	// NOTE(c4llv07e): Move cursor on input here.
+	insert_text_no_undo(ctx, tb, content, position);
+	copy_string(content);
+	arr: [..]u8;
+	array_copy(*arr, cast([]u8)content);
+	undo_push_op(ctx, tb, .{type = .Insert, group = undo_group, pos = position, data = arr});
+}
+
+delete_text_no_undo :: (using ctx: *Ctx, tb: *Text_Buffer, position: s64, length: s64) {
+	assert(position >= 0, "Can't remove text from negative index");
+	assert(tb.buffer.count >= position + length, "Can't remove text outside of the text buffer");
+	if tb.buffer.count > position + length {
+		memcpy(*tb.buffer[position], *tb.buffer[position + length], tb.buffer.count - position - length);
+		array_resize(*tb.buffer, tb.buffer.count - length);
+	}
+	if cursor >= (position + length) then cursor -= length;
+	else if cursor >= position then cursor = position;
+	if selection_mark >= (position + length) then selection_mark -= length;
+	else if selection_mark >= position then selection_mark = position;
+	should_render = true;
+}
+
+delete_text :: (using ctx: *Ctx, tb: *Text_Buffer, position: s64, length: s64, undo_group: Undo_Group) {
+	arr: [..]u8;
+	array_copy(*arr, cast([]u8)slice(cast(string)tb.buffer, position, length));
+	delete_text_no_undo(ctx, tb, position, length);
+	undo_push_op(ctx, tb, .{type = .Delete, group = undo_group, pos = position, data = arr});
 }
 
 calculate_vislines :: (using ctx: *Ctx) {
@@ -509,17 +555,12 @@ update_required_cursor_width :: inline (using ctx: *Ctx) {
 	required_cursor_width = measure_string_with_tab(ctx, font, slice(sv, line_start + 1, cursor - line_start - 1));
 }
 
-insert_char_u8 :: (using ctx: *Ctx, $char: u8) {
-	array_insert_at(*text_buffer.buffer, char, cursor);
-	arr: [..]u8;
-	array_add(*arr, char);
-	undo_push_op(ctx, *text_buffer, .{type = .Insert, group = .Keyboard, pos = cursor, data = arr});
-	text_buffer.modified = true;
-	if selection_mark >= cursor
-		selection_mark += 1;
-	cursor += 1;
-	required_cursor_width = -1;
-	should_render = true;
+insert_char_u8 :: (using ctx: *Ctx, $char: u8, $undo_group: Undo_Group = .Keyboard) {
+	ch := char;
+	sv: string = ---;
+	sv.data = *ch;
+	sv.count = 1;
+	insert_text(ctx, *text_buffer, sv, cursor, undo_group);
 }
 
 go_left :: (using ctx: *Ctx) {
@@ -558,34 +599,13 @@ go_right :: (using ctx: *Ctx) {
 
 remove_previous_char :: (using ctx: *Ctx) {
 	from := cursor;
-	arr: [..]u8;
-	array_resize(*arr, 5);
-	index := arr.count - 1;
-	while cursor > text_buffer.immutable_prefix_size && ((text_buffer.buffer.data[cursor - 1] & 0xc0) == 0x80) {
-		if selection_mark >= cursor
-			selection_mark -= 1;
-		cursor -= 1;
-		arr[index] = text_buffer.buffer[cursor];
-		index -= 1;
-		assert(index > 0);
-		array_ordered_remove_by_index(*text_buffer.buffer, cursor);
+	while from > text_buffer.immutable_prefix_size && ((text_buffer.buffer.data[from - 1] & 0xc0) == 0x80) {
+		from -= 1;
 	}
-	if cursor > text_buffer.immutable_prefix_size {
-		arr[index] = text_buffer.buffer[cursor - 1];
-		index -= 1;
-		assert(index > 0);
-		array_ordered_remove_by_index(*text_buffer.buffer, cursor - 1);
-		if selection_mark >= cursor
-			selection_mark -= 1;
-		cursor -= 1;
+	if from > text_buffer.immutable_prefix_size {
+		from -= 1;
 	}
-	// 0 0 0 0 1 --- index = 3 --- 1 0 0 0 0
-	// 0 1 1 1 1 --- index = 0 --- 1 1 1 1 0
-	memcpy(*arr.data[0], *arr.data[index + 1], arr.count - index - 1);
-	array_resize(*arr, arr.count - index - 1);
-	undo_push_op(ctx, *text_buffer, .{type = .Delete, group = .Keyboard, pos = cursor, data = arr});
-	required_cursor_width = -1;
-	should_render = true;
+	delete_text(ctx, *text_buffer, from, cursor - from, .Keyboard);
 }
 
 set_mark :: (using ctx: *Ctx) {
@@ -604,20 +624,9 @@ cut_selection :: (using ctx: *Ctx) {
 	if cursor == selection_mark return;
 	from := min(cursor, selection_mark);
 	to := max(cursor, selection_mark);
-	copy_to_clipboard(slice(cast(string)text_buffer.buffer, from, to - from));
-	if cursor > from {
-		cursor = from;
-	}
-	if selection_mark > from {
-		selection_mark = from;
-	}
-	arr: [..]u8;
-	array_add(*arr, ..cast([]u8)slice(cast(string)text_buffer.buffer, from, to - from));
-	undo_push_op(ctx, *text_buffer, .{type = .Delete, group = .Clipboard, pos = from, data = arr});
-	if to < (text_buffer.buffer.count)
-		memcpy(*text_buffer.buffer[from], *text_buffer.buffer[to], text_buffer.buffer.count - to);
-	text_buffer.buffer.count -= to - from;
-	should_render = true;
+	sv := slice(cast(string)text_buffer.buffer, from, to - from);
+	copy_to_clipboard(sv);
+	delete_text(ctx, *text_buffer, from, sv.count, .Clipboard);
 }
 
 paste_text :: (using ctx: *Ctx) {
@@ -625,19 +634,8 @@ paste_text :: (using ctx: *Ctx) {
 	cstr := SDL_GetClipboardText();
 	if cstr == null return;
 	defer SDL_free(cstr);
-	iter := 0;
-	while cstr[iter] != 0 {
-		array_insert_at(*text_buffer.buffer, cstr[iter], cursor + iter);
-		text_buffer.modified = true;
-		iter += 1;
-	}
-	arr: [..]u8;
-	array_add(*arr, ..cast([]u8)slice(cast(string)text_buffer.buffer, cursor, iter));
-	undo_push_op(ctx, *text_buffer, .{type = .Insert, group = .Clipboard, pos = cursor, data = arr});
-	if selection_mark >= cursor
-		selection_mark += iter;
-	cursor += iter;
-	should_render = true;
+	sv := to_string(cstr);
+	insert_text(ctx, *text_buffer, sv, cursor, .Clipboard);
 }
 
 go_line_beginning :: (using ctx: *Ctx) {
@@ -809,52 +807,46 @@ save_path_or_prompt :: (using ctx: *Ctx) {
 	prompt_and_save(ctx);
 }
 
-undo :: (using ctx: *Ctx) {
-	if text_buffer.undos_cursor <= 0 return;
-	op := text_buffer.undos[text_buffer.undos_cursor - 1];
+undo :: (using ctx: *Ctx, tb: *Text_Buffer = null) {
+	if tb == null then tb = *text_buffer;
+	if tb.undos_cursor <= 0 return;
+	op := tb.undos[tb.undos_cursor - 1];
 	if op.type == {
 		case .Insert;
 		// -----f----t--------l
 		// -----t--------l
-		memcpy(*text_buffer.buffer.data[op.pos], *text_buffer.buffer.data[op.pos + op.data.count], text_buffer.buffer.count - (op.pos + op.data.count));
-		text_buffer.buffer.count -= op.data.count;
-		text_buffer.undos_cursor -= 1;
+		memcpy(*tb.buffer.data[op.pos], *tb.buffer.data[op.pos + op.data.count], tb.buffer.count - (op.pos + op.data.count));
+		tb.buffer.count -= op.data.count;
+		tb.undos_cursor -= 1;
 		if cursor >= (op.pos + op.data.count) then cursor -= op.data.count;
 		else if cursor >= op.pos then cursor = op.pos;
 		if selection_mark >= (op.pos + op.data.count) then selection_mark -= op.data.count;
 		else if selection_mark >= op.pos then selection_mark = op.pos;
 		case .Delete;
-		for byte, index: op.data {
-			array_insert_at(*text_buffer.buffer, byte, op.pos + index);
-		}
-		if cursor >= op.pos then cursor += op.data.count;
-		if selection_mark >= op.pos then selection_mark += op.data.count;
-		text_buffer.undos_cursor -= 1;
+		insert_text_no_undo(ctx, tb, cast(string)op.data, op.pos);
+		tb.undos_cursor -= 1;
 		case;
 		log_error("Unknown undo operation type %", op.type);
 	}
 	should_render = true;
 }
 
-redo :: (using ctx: *Ctx) {
-	if text_buffer.undos_cursor >= text_buffer.undos.count return;
-	op := text_buffer.undos[text_buffer.undos_cursor];
+redo :: (using ctx: *Ctx, tb: *Text_Buffer = null) {
+	if tb == null then tb = *text_buffer;
+	if tb.undos_cursor >= tb.undos.count return;
+	op := tb.undos[tb.undos_cursor];
 	if op.type == {
 		case .Delete;
-		memcpy(*text_buffer.buffer.data[op.pos], *text_buffer.buffer.data[op.pos + op.data.count], text_buffer.buffer.count - (op.pos + op.data.count));
-		text_buffer.buffer.count -= op.data.count;
-		text_buffer.undos_cursor += 1;
+		memcpy(*tb.buffer.data[op.pos], *tb.buffer.data[op.pos + op.data.count], tb.buffer.count - (op.pos + op.data.count));
+		tb.buffer.count -= op.data.count;
+		tb.undos_cursor += 1;
 		if cursor >= (op.pos + op.data.count) then cursor -= op.data.count;
 		else if cursor >= op.pos then cursor = op.pos;
 		if selection_mark >= (op.pos + op.data.count) then selection_mark -= op.data.count;
 		else if selection_mark >= op.pos then selection_mark = op.pos;
 		case .Insert;
-		for byte, index: op.data {
-			array_insert_at(*text_buffer.buffer, byte, op.pos + index);
-		}
-		if cursor >= op.pos then cursor += op.data.count;
-		if selection_mark >= op.pos then selection_mark += op.data.count;
-		text_buffer.undos_cursor += 1;
+		insert_text_no_undo(ctx, tb, cast(string)op.data, op.pos);
+		tb.undos_cursor += 1;
 		case;
 		log_error("Unknown undo operation type %", op.type);
 	}
@@ -1019,18 +1011,8 @@ main :: () {
 				}
 				case .TEXT_INPUT;
 				text := to_string(event.text.text);
-				for byte: text {
-					array_insert_at(*text_buffer.buffer, byte, xx cursor);
-					text_buffer.modified = true;
-					if selection_mark >= cursor
-						selection_mark += 1;
-					cursor += 1;
-				}
-				arr: [..]u8;
-				array_add(*arr, ..cast([]u8)slice(cast(string)text_buffer.buffer, cursor - text.count, text.count));
-				undo_push_op(*ctx, *text_buffer, .{type = .Insert, group = .Keyboard, pos = cursor - text.count, data = arr});
-				required_cursor_width = -1;
-				should_render = true;
+				text_buffer.modified = true;
+				insert_text(*ctx, *text_buffer, text, cursor, .Keyboard);
 				case .MOUSE_MOTION;
 				if event.motion.state & .LEFT {
 					new_cursor := clamp(point_to_cursor(*ctx, event.mouse.x, event.mouse.y), text_buffer.immutable_prefix_size, text_buffer.buffer.count);

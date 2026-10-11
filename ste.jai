@@ -3,8 +3,10 @@
 // TODO(c4llv07e): Add save and open dialogs.
 // TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
 // TODO(c4llv07e): array_insert_at accepts only one byte at a time, we need faster function to insert text.
-// TODO(c4llv07e): Layered keybinds so file prompt will have only "return" keybind but will work the same as
-//                 in any text buffer.
+// TODO(c4llv07e): More keybinds for text movement.
+// TODO(c4llv07e): Follow cursor on input.
+// TODO(c4llv07e): Undo-redo.
+// TODO(c4llv07e): Profile everything.
 
 // NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
 
@@ -24,7 +26,8 @@ Visual_Line :: struct {
 
 Buffer_Type :: enum u32 {
 	Text;
-	File_Dialog;
+	File_Dialog; // _Open
+	File_Dialog_Save;
 }
 
 Text_Buffer :: struct {
@@ -32,6 +35,7 @@ Text_Buffer :: struct {
 	filepath: string;
 	content_type: Buffer_Type;
 	immutable_prefix_size: s64;
+	modified: bool;
 }
 
 Ctx :: struct {
@@ -342,7 +346,7 @@ render :: (using ctx: *Ctx) {
 		col = utf8_count_codepoints(slice(cast(string)text_buffer.buffer, visline.start_byte_offset, cursor - visline.start_byte_offset));
 		linenum = visline.real_line_number;
 	}
-	linecol_text := tprint("Ln: %, Col: %, Buff: %", linenum + 1, col + 1, text_buffer.filepath);
+	linecol_text := tprint("Ln: %, Col: %, Buff: %3%4", linenum + 1, col + 1, text_buffer.filepath, (ifx text_buffer.modified then "*" else ""));
 	draw_text(renderer, font, linecol_panel_rect.x + linecol_padding, linecol_panel_rect.y + linecol_padding, .{0xe3, 0xe3, 0xe3, 0xff}, linecol_text);
 	SDL_RenderPresent(renderer);
 	render_frame_count += 1;
@@ -442,6 +446,7 @@ update_required_cursor_width :: inline (using ctx: *Ctx) {
 
 insert_char_u8 :: (using ctx: *Ctx, $char: u8) {
 	array_insert_at(*text_buffer.buffer, char, cursor);
+	text_buffer.modified = true;
 	if selection_mark >= cursor
 		selection_mark += 1;
 	cursor += 1;
@@ -523,7 +528,8 @@ cut_selection :: (using ctx: *Ctx) {
 	if selection_mark > from {
 		selection_mark = from;
 	}
-	memcpy(*text_buffer.buffer[from], *text_buffer.buffer[to], text_buffer.buffer.count - to);
+	if to < (text_buffer.buffer.count)
+		memcpy(*text_buffer.buffer[from], *text_buffer.buffer[to], text_buffer.buffer.count - to);
 	text_buffer.buffer.count -= to - from;
 	should_render = true;
 }
@@ -536,6 +542,7 @@ paste_text :: (using ctx: *Ctx) {
 	iter := 0;
 	while cstr[iter] != 0 {
 		array_insert_at(*text_buffer.buffer, cstr[iter], cursor + iter);
+		text_buffer.modified = true;
 		iter += 1;
 	}
 	if selection_mark >= cursor
@@ -568,6 +575,15 @@ stash_file_buffer :: (using ctx: *Ctx) {
 	text_buffer = .{}; // reset without cleaning space.
 }
 
+try_enable_mode :: (using ctx: *Ctx, name: string) {
+	mode_index := find_mode_index(ctx.keybind_root, name);
+	if mode_index != -1 {
+		if !is_mode_enabled(ctx.modes, mode_index) {
+			array_add(*ctx.modes, mode_index);
+		}
+	}
+}
+
 open_file_dialog :: (using ctx: *Ctx) {
 	// Theoretically you could open file dialog inside another file dialog. Don't know if
 	// we should prevent this.
@@ -578,18 +594,13 @@ open_file_dialog :: (using ctx: *Ctx) {
 	}
 	stash_file_buffer(ctx);
 	text_buffer.content_type = .File_Dialog;
-	prefix :: "Enter file path: ";
+	prefix :: "Enter file path to open: ";
 	text_buffer.immutable_prefix_size = prefix.count;
 	array_add(*text_buffer.buffer, ..cast([]u8)prefix);
 	array_add(*text_buffer.buffer, ..cast([]u8)prefix_path);
-	file_dialog_index := find_mode_index(ctx.keybind_root, "file_dialog");
-	if file_dialog_index != -1 {
-		if !is_mode_enabled(ctx.modes, file_dialog_index) {
-			array_add(*ctx.modes, file_dialog_index);
-		}
-	}
+	try_enable_mode(ctx, "file_dialog");
 	cursor = text_buffer.buffer.count;
-	selection_mark = cursor;
+	selection_mark = text_buffer.immutable_prefix_size;
 	should_render = true;
 }
 
@@ -617,7 +628,23 @@ file_dialog_enter :: (using ctx: *Ctx) {
 	entered_path := cast(string)text_buffer.buffer;
 	filepath := copy_temporary_string(trim(slice(entered_path, text_buffer.immutable_prefix_size, text_buffer.buffer.count)));
 	if text_buffer.content_type != .File_Dialog {
-		log_error("Got file dialog button inside non file dialog buffer");
+		if text_buffer.content_type != .File_Dialog_Save {
+			log_error("Got file dialog button inside non file dialog buffer");
+		} else {
+			try_disable_mode(ctx, "file_dialog");
+			if text_buffers.count <= 0 {
+				log_error("Something very bad happened with your text editor, tried to save non-existent buffer.");
+				// What should I even do at this point?
+				return;
+			}
+			text_buffer = pop(*text_buffers);
+			if text_buffer.filepath then free(text_buffer.filepath);
+			text_buffer.filepath = copy_string(filepath);
+			write_entire_file(filepath, cast(string)text_buffer.buffer);
+			text_buffer.modified = false;
+			should_render = true;
+			return;
+		}
 	} else {
 		array_reset(*text_buffer.buffer);
 		for text_buffers {
@@ -654,6 +681,34 @@ abort_file_dialog :: (using ctx: *Ctx) {
 	try_disable_mode(ctx, "file_dialog");
 	cursor = text_buffer.immutable_prefix_size;
 	selection_mark = cursor;
+}
+
+prompt_and_save :: (using ctx: *Ctx) {
+	prefix_path: string = "./";
+	if text_buffer.filepath {
+		prefix_path = get_absolute_path(text_buffer.filepath,, temp);
+		prefix_path = path_strip_filename(prefix_path);
+	}
+	stash_file_buffer(ctx);
+	text_buffer.content_type = .File_Dialog_Save;
+	prefix :: "Enter save path: ";
+	text_buffer.immutable_prefix_size = prefix.count;
+	array_add(*text_buffer.buffer, ..cast([]u8)prefix);
+	array_add(*text_buffer.buffer, ..cast([]u8)prefix_path);
+	try_enable_mode(ctx, "file_dialog");
+	cursor = text_buffer.buffer.count;
+	selection_mark = text_buffer.immutable_prefix_size;
+	should_render = true;
+}
+
+save_path_or_prompt :: (using ctx: *Ctx) {
+	if text_buffer.filepath {
+		write_entire_file(text_buffer.filepath, cast(string)text_buffer.buffer);
+		text_buffer.modified = false;
+		should_render = true;
+		return;
+	}
+	prompt_and_save(ctx);
 }
 
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
@@ -694,6 +749,10 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		file_dialog_enter(ctx);
 		case "abort_file_dialog";
 		abort_file_dialog(ctx);
+		case "save_path_or_prompt";
+		save_path_or_prompt(ctx);
+		case "prompt_and_save";
+		prompt_and_save(ctx);
 		case;
 		log_error("unknown command %", command);
 		return false;
@@ -808,6 +867,7 @@ main :: () {
 				text := to_string(event.text.text);
 				for byte: text {
 					array_insert_at(*text_buffer.buffer, byte, xx cursor);
+					text_buffer.modified = true;
 					if selection_mark >= cursor
 						selection_mark += 1;
 					cursor += 1;

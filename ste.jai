@@ -571,18 +571,24 @@ stash_file_buffer :: (using ctx: *Ctx) {
 open_file_dialog :: (using ctx: *Ctx) {
 	// Theoretically you could open file dialog inside another file dialog. Don't know if
 	// we should prevent this.
+	prefix_path: string = "./";
+	if text_buffer.filepath {
+		prefix_path = get_absolute_path(text_buffer.filepath);
+		prefix_path = path_strip_filename(prefix_path);
+	}
 	stash_file_buffer(ctx);
 	text_buffer.content_type = .File_Dialog;
 	prefix :: "Enter file path: ";
 	text_buffer.immutable_prefix_size = prefix.count;
 	array_add(*text_buffer.buffer, ..cast([]u8)prefix);
+	array_add(*text_buffer.buffer, ..cast([]u8)prefix_path);
 	file_dialog_index := find_mode_index(ctx.keybind_root, "file_dialog");
 	if file_dialog_index != -1 {
 		if !is_mode_enabled(ctx.modes, file_dialog_index) {
 			array_add(*ctx.modes, file_dialog_index);
 		}
 	}
-	cursor = text_buffer.immutable_prefix_size;
+	cursor = text_buffer.buffer.count;
 	selection_mark = cursor;
 	should_render = true;
 }
@@ -600,6 +606,13 @@ open_buffer_from_file :: (using ctx: *Ctx, filepath: string) -> Text_Buffer {
 	return new_buffer;
 }
 
+try_disable_mode :: (using ctx: *Ctx, mode: string) {
+	file_dialog_index := find_mode_index(ctx.keybind_root, mode);
+	if file_dialog_index != -1 {
+		array_ordered_remove_by_value(*ctx.modes, file_dialog_index);
+	}
+}
+
 file_dialog_enter :: (using ctx: *Ctx) {
 	entered_path := cast(string)text_buffer.buffer;
 	filepath := copy_temporary_string(trim(slice(entered_path, text_buffer.immutable_prefix_size, text_buffer.buffer.count)));
@@ -612,10 +625,7 @@ file_dialog_enter :: (using ctx: *Ctx) {
 		}
 	}
 	text_buffer = open_buffer_from_file(ctx, filepath);
-	file_dialog_index := find_mode_index(ctx.keybind_root, "file_dialog");
-	if file_dialog_index != -1 {
-		array_ordered_remove_by_value(*ctx.modes, file_dialog_index);
-	}
+	try_disable_mode(ctx, "file_dialog");
 	for text_buffers {
 		array_free(it.buffer);
 		if it.filepath then free(it.filepath);
@@ -629,6 +639,21 @@ file_dialog_enter :: (using ctx: *Ctx) {
 swap_mark_with_cursor :: (using ctx: *Ctx) {
 	Swap(*cursor, *selection_mark);
 	should_render = true;
+}
+
+abort_file_dialog :: (using ctx: *Ctx) {
+	should_render = true;
+	if text_buffers.count <= 0 {
+		log_error("File dialog is the only buffer, creating new buffer.");
+		text_buffer = .{};
+		cursor = text_buffer.immutable_prefix_size;
+		selection_mark = cursor;
+		return;
+	}
+	text_buffer = pop(*text_buffers);
+	try_disable_mode(ctx, "file_dialog");
+	cursor = text_buffer.immutable_prefix_size;
+	selection_mark = cursor;
 }
 
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
@@ -667,6 +692,8 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		open_file_dialog(ctx);
 		case "enter_path";
 		file_dialog_enter(ctx);
+		case "abort_file_dialog";
+		abort_file_dialog(ctx);
 		case;
 		log_error("unknown command %", command);
 		return false;

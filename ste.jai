@@ -22,6 +22,18 @@ Visual_Line :: struct {
 	length: s64;
 }
 
+Buffer_Type :: enum u32 {
+	Text;
+	File_Dialog;
+}
+
+Text_Buffer :: struct {
+#as buffer: [..]u8;
+	filepath: string;
+	content_type: Buffer_Type;
+	immutable_prefix_size: s64;
+}
+
 Ctx :: struct {
 	keybind_root: Keybind_Root;
 	modes: [..]s64;
@@ -37,8 +49,8 @@ Ctx :: struct {
 	cursor: s64;
 	cursor_interp: SDL_FPoint;
 	real_cursor_position: SDL_FPoint;
-	text_buffer: [..]u8;
-	text_buffers: [..][..]u8; // Because I am too lazy to do proper abstraction over text editing code.
+	text_buffer: Text_Buffer;
+	text_buffers: [..]Text_Buffer; // Because I am too lazy to do proper abstraction over text editing code.
 	scroll: float32;
 	scroll_interp: float32;
 	line_number_width: float32;
@@ -53,7 +65,7 @@ Ctx :: struct {
 
 calculate_vislines :: (using ctx: *Ctx) {
 	array_reset(*visual_lines);
-	sv := cast(string)text_buffer;
+	sv := cast(string)text_buffer.buffer;
 	if !sv return;
 	adv: s32;
 	initial_window_width := window_width - line_number_width;
@@ -78,7 +90,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 		}
 		assert(ok != .SOURCE_ILLEGAL, "Can't iterate over text buffer, error on '%': %", slice(sv, 0, 5), ok);
 		if cp == #char "\n" {
-			array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.data, sv.data - line_begin.data - 1});
+			array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.buffer.data, sv.data - line_begin.data - 1});
 			newlines_count += 1;
 			line_begin = sv;
 			left_space = initial_window_width;
@@ -87,7 +99,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 		adv = measure_char_or_tab(ctx, font, cp);
 		left_space -= adv;
 		if left_space <= 0 && (before_char.data - line_begin.data > 0) {
-			array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.data, before_char.data - line_begin.data});
+			array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.buffer.data, before_char.data - line_begin.data});
 			line_begin = before_char;
 			sv = before_char;
 			left_space = initial_window_width;
@@ -95,7 +107,7 @@ calculate_vislines :: (using ctx: *Ctx) {
 		}
 	}
 	assert(!hard_locked, "Hard locked at generating visual lines");
-	array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.data, sv.data - line_begin.data});
+	array_add(*visual_lines, .{newlines_count, line_begin.data - text_buffer.buffer.data, sv.data - line_begin.data});
 	line_number_width = (1 + SDL_ceilf(SDL_log10f(xx (newlines_count + 2)))) * digit_width;
 }
 
@@ -198,7 +210,7 @@ update_real_cursor_position :: (using ctx: *Ctx) {
 		before_cursor_string_length := (cursor - cursor_visline.start_byte_offset);
 		width: s32;
 		if before_cursor_string_length > 0
-			width = measure_string_with_tab(ctx, font, slice(cast(string)text_buffer, cursor_visline.start_byte_offset, before_cursor_string_length));
+			width = measure_string_with_tab(ctx, font, slice(cast(string)text_buffer.buffer, cursor_visline.start_byte_offset, before_cursor_string_length));
 		else
 			width = 0;
 		real_cursor_position = .{line_number_width + xx width, xx ((cursor_visline_index * font_height) - scroll_interp)};
@@ -229,7 +241,7 @@ render :: (using ctx: *Ctx) {
 		if (xx ((it_index + 1) * font_height) - scroll_interp) < 0 then continue;
 		if (xx (it_index * font_height) - scroll_interp) > xx window_height then break;
 		line: string = ---;
-		line.data = *text_buffer.data[it.start_byte_offset];
+		line.data = *text_buffer.buffer.data[it.start_byte_offset];
 		line.count = it.length;
 		if max_real_line_number < it.real_line_number + 1 {
 			draw_text(renderer, font, 0, xx (it_index * font_height) - scroll_interp, .{0x43, 0x83, 0x43, 0xff}, tprint("%", it.real_line_number + 1));
@@ -253,6 +265,15 @@ render :: (using ctx: *Ctx) {
 		draw_on_left(ctx, xx (font_height * 3), tprint("%", required_cursor_width));
 		draw_on_left(ctx, xx (font_height * 4), tprint("%", font_height));
 		draw_on_left(ctx, xx (font_height * 5), tprint("%", ctx.modes));
+#if true {
+			sb: String_Builder;
+			print(*sb, "[");
+			for ctx.text_buffers {
+				print(*sb, "%, ", it.content_type);
+			}
+			print(*sb, "]");
+			draw_on_left(ctx, xx (font_height * 6), builder_to_string(*sb));
+		}
 	}
 	static_cursor_width := max(1.0, font_height / 8.0);
 	cursor_width := max(static_cursor_width, SDL_logf(length_squared(real_cursor_position - cursor_interp)));
@@ -266,7 +287,7 @@ render :: (using ctx: *Ctx) {
 			selection_visline := visual_lines[selection_visline_index];
 			before_selection_length := (selection_mark - selection_visline.start_byte_offset);
 			if before_selection_length > 0 {
-				width = measure_string_with_tab(ctx, font, slice(cast(string)text_buffer,
+				width = measure_string_with_tab(ctx, font, slice(cast(string)text_buffer.buffer,
 										 selection_visline.start_byte_offset,
 										 before_selection_length));
 			}
@@ -318,10 +339,11 @@ render :: (using ctx: *Ctx) {
 	linenum: s64 = 0;
 	if vislinenum != -1 { 
 		visline := visual_lines[vislinenum];
-		col = utf8_count_codepoints(slice(cast(string)text_buffer, visline.start_byte_offset, cursor - visline.start_byte_offset));
+		col = utf8_count_codepoints(slice(cast(string)text_buffer.buffer, visline.start_byte_offset, cursor - visline.start_byte_offset));
 		linenum = visline.real_line_number;
 	}
-	draw_text(renderer, font, linecol_panel_rect.x + linecol_padding, linecol_panel_rect.y + linecol_padding, .{0xe3, 0xe3, 0xe3, 0xff}, tprint("Ln: %, Col: %", linenum + 1, col + 1));
+	linecol_text := tprint("Ln: %, Col: %, Buff: %", linenum + 1, col + 1, text_buffer.filepath);
+	draw_text(renderer, font, linecol_panel_rect.x + linecol_padding, linecol_panel_rect.y + linecol_padding, .{0xe3, 0xe3, 0xe3, 0xff}, linecol_text);
 	SDL_RenderPresent(renderer);
 	render_frame_count += 1;
 	should_render = false;
@@ -337,7 +359,7 @@ check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc :
 point_to_cursor :: (using ctx: *Ctx, point_x: float32, point_y: float32) -> s64 {
 	y := 0.0;
 	font_height := TTF_GetFontHeight(font);
-	sv := cast(string)text_buffer;
+	sv := cast(string)text_buffer.buffer;
 	point_y += scroll_interp;
 	point_x -= line_number_width;
 	if point_y < 0 return 0;
@@ -371,11 +393,11 @@ create_textures :: (using ctx: *Ctx) {
 }
 
 go_up_line :: (using ctx: *Ctx) {
-	sv := cast(string)text_buffer;
+	sv := cast(string)text_buffer.buffer;
 	first_nl := find_index_from_right(slice(sv, 0, cursor), #char "\n");
 	should_render = true;
-	if first_nl <= 0 {
-		cursor = 0;
+	if first_nl <= text_buffer.immutable_prefix_size {
+		cursor = text_buffer.immutable_prefix_size;
 		return;
 	}
 	if required_cursor_width == -1 {
@@ -391,7 +413,7 @@ go_up_line :: (using ctx: *Ctx) {
 }
 
 go_down_line :: (using ctx: *Ctx) {
-	sv := cast(string)text_buffer;
+	sv := cast(string)text_buffer.buffer;
 	first_nl := find_index_from_left(slice(sv, cursor, sv.count), #char "\n");
 	should_render = true;
 	if first_nl < 0 {
@@ -413,13 +435,13 @@ go_down_line :: (using ctx: *Ctx) {
 }
 
 update_required_cursor_width :: inline (using ctx: *Ctx) {
-	sv := cast(string)text_buffer;
+	sv := cast(string)text_buffer.buffer;
 	line_start := find_index_from_right(slice(sv, 0, cursor), #char "\n");
 	required_cursor_width = measure_string_with_tab(ctx, font, slice(sv, line_start + 1, cursor - line_start - 1));
 }
 
 insert_char_u8 :: (using ctx: *Ctx, $char: u8) {
-	array_insert_at(*text_buffer, char, cursor);
+	array_insert_at(*text_buffer.buffer, char, cursor);
 	if selection_mark >= cursor
 		selection_mark += 1;
 	cursor += 1;
@@ -428,9 +450,9 @@ insert_char_u8 :: (using ctx: *Ctx, $char: u8) {
 }
 
 go_left :: (using ctx: *Ctx) {
-	if cursor > 0 {
+	if cursor > text_buffer.immutable_prefix_size {
 		cursor -= 1;
-		while cursor > 0 && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
+		while cursor > text_buffer.immutable_prefix_size && ((text_buffer.buffer.data[cursor] & 0xc0) == 0x80) {
 			cursor -= 1;
 		}
 		required_cursor_width = -1;
@@ -439,9 +461,9 @@ go_left :: (using ctx: *Ctx) {
 }
 
 go_right :: (using ctx: *Ctx) {
-	if cursor < text_buffer.count {
+	if cursor < text_buffer.buffer.count {
 		cursor += 1;
-		while cursor < text_buffer.count && ((text_buffer.data[cursor] & 0xc0) == 0x80) {
+		while cursor < text_buffer.buffer.count && ((text_buffer.buffer.data[cursor] & 0xc0) == 0x80) {
 			cursor += 1;
 		}
 		required_cursor_width = -1;
@@ -451,10 +473,10 @@ go_right :: (using ctx: *Ctx) {
 
 #if false {
 	go_left_word :: (using ctx: *Ctx) {
-		if cursor > 0 {
-			cp, ok := utf8_step_back(cast(string)text_buffer, *cursor);
+		if cursor > text_buffer.immutable_prefix_size {
+			cp, ok := utf8_step_back(cast(string)text_buffer.buffer, *cursor);
 			should_render = true;
-			while cursor > 0 && is_alpha(cp) && is_digit(text_buffer[cursor]) {
+			while cursor > 0 && is_alpha(cp) && is_digit(text_buffer.buffer[cursor]) {
 				cursor -= 1;
 			}
 		}
@@ -462,14 +484,14 @@ go_right :: (using ctx: *Ctx) {
 }
 
 remove_previous_char :: (using ctx: *Ctx) {
-	while cursor > 0 && ((text_buffer.data[cursor - 1] & 0xc0) == 0x80) {
+	while cursor > text_buffer.immutable_prefix_size && ((text_buffer.buffer.data[cursor - 1] & 0xc0) == 0x80) {
 		if selection_mark >= cursor
 			selection_mark -= 1;
 		cursor -= 1;
-		array_ordered_remove_by_index(*text_buffer, cursor);
+		array_ordered_remove_by_index(*text_buffer.buffer, cursor);
 	}
-	if cursor > 0 {
-		array_ordered_remove_by_index(*text_buffer, cursor - 1);
+	if cursor > text_buffer.immutable_prefix_size {
+		array_ordered_remove_by_index(*text_buffer.buffer, cursor - 1);
 		if selection_mark >= cursor
 			selection_mark -= 1;
 		cursor -= 1;
@@ -487,22 +509,22 @@ copy_selection :: (using ctx: *Ctx) {
 	if cursor == selection_mark return;
 	from := min(cursor, selection_mark);
 	to := max(cursor, selection_mark);
-	copy_to_clipboard(slice(cast(string)text_buffer, from, to - from));
+	copy_to_clipboard(slice(cast(string)text_buffer.buffer, from, to - from));
 }
 
 cut_selection :: (using ctx: *Ctx) {
 	if cursor == selection_mark return;
 	from := min(cursor, selection_mark);
 	to := max(cursor, selection_mark);
-	copy_to_clipboard(slice(cast(string)text_buffer, from, to - from));
+	copy_to_clipboard(slice(cast(string)text_buffer.buffer, from, to - from));
 	if cursor > from {
 		cursor = from;
 	}
 	if selection_mark > from {
 		selection_mark = from;
 	}
-	memcpy(*text_buffer[from], *text_buffer[to], text_buffer.count - to);
-	text_buffer.count -= to - from;
+	memcpy(*text_buffer.buffer[from], *text_buffer.buffer[to], text_buffer.buffer.count - to);
+	text_buffer.buffer.count -= to - from;
 	should_render = true;
 }
 
@@ -513,7 +535,7 @@ paste_text :: (using ctx: *Ctx) {
 	defer SDL_free(cstr);
 	iter := 0;
 	while cstr[iter] != 0 {
-		array_insert_at(*text_buffer, cstr[iter], cursor + iter);
+		array_insert_at(*text_buffer.buffer, cstr[iter], cursor + iter);
 		iter += 1;
 	}
 	if selection_mark >= cursor
@@ -523,55 +545,84 @@ paste_text :: (using ctx: *Ctx) {
 }
 
 go_line_beginning :: (using ctx: *Ctx) {
-	if cursor <= 0 return;
+	if cursor <= text_buffer.immutable_prefix_size return;
 	cursor -= 1;
 	should_render = true;
 	required_cursor_width = -1;
-	while cursor > 0 && text_buffer[cursor] != #char "\n" cursor -= 1;
-	if text_buffer[cursor] == #char "\n" cursor += 1;
+	while cursor > text_buffer.immutable_prefix_size && text_buffer.buffer[cursor] != #char "\n" cursor -= 1;
+	if text_buffer.buffer[cursor] == #char "\n" cursor += 1;
 }
 
 go_line_end :: (using ctx: *Ctx) {
-	if cursor >= text_buffer.count return;
+	if cursor >= text_buffer.buffer.count return;
 	should_render = true;
 	required_cursor_width = -1;
-	while cursor < text_buffer.count && text_buffer[cursor] != #char "\n" cursor += 1;
+	while cursor < text_buffer.buffer.count && text_buffer.buffer[cursor] != #char "\n" cursor += 1;
+}
+
+// Current model is too simple to introduce some form of multi buffer memory management.
+// So for now currently opened buffer is in text_buffer and text_buffers stack is used only
+// for shadowed buffers (like for a file content while the new one is a file dialog).
+stash_file_buffer :: (using ctx: *Ctx) {
+	array_add(*text_buffers, text_buffer); // Save current one.
+	text_buffer = .{}; // reset without cleaning space.
 }
 
 open_file_dialog :: (using ctx: *Ctx) {
 	// Theoretically you could open file dialog inside another file dialog. Don't know if
 	// we should prevent this.
-	array_add(*text_buffers, text_buffer);
-	array_reset(*text_buffer);
+	stash_file_buffer(ctx);
+	text_buffer.content_type = .File_Dialog;
+	prefix :: "Enter file path: ";
+	text_buffer.immutable_prefix_size = prefix.count;
+	array_add(*text_buffer.buffer, ..cast([]u8)prefix);
 	file_dialog_index := find_mode_index(ctx.keybind_root, "file_dialog");
 	if file_dialog_index != -1 {
 		if !is_mode_enabled(ctx.modes, file_dialog_index) {
 			array_add(*ctx.modes, file_dialog_index);
 		}
 	}
-	cursor = 0;
-	selection_mark = 0;
+	cursor = text_buffer.immutable_prefix_size;
+	selection_mark = cursor;
 	should_render = true;
 }
 
-file_dialog_enter :: (using ctx: *Ctx) {
-	filepath := copy_string(cast(string)text_buffer);
-	defer free(filepath);
-	// Maybe should trim first.
-	// Also, need to check if text_buffer is actually a file dialog somehow.
-	array_reset(*text_buffer);
+// Creates now buffer on the text_buffer stack and returns pointer to it.
+open_buffer_from_file :: (using ctx: *Ctx, filepath: string) -> Text_Buffer {
 	content, exists := read_entire_file(filepath);
 	if !exists {
 		log_error("Can't open file '%'", filepath);
 		content = copy_string("");
 	}
-	array_add(*text_buffer, ..cast([]u8)content);
+	new_buffer: Text_Buffer;
+	array_add(*new_buffer.buffer, ..cast([]u8)content);
+	new_buffer.filepath = copy_string(filepath);
+	return new_buffer;
+}
+
+file_dialog_enter :: (using ctx: *Ctx) {
+	entered_path := cast(string)text_buffer.buffer;
+	filepath := copy_temporary_string(trim(slice(entered_path, text_buffer.immutable_prefix_size, text_buffer.buffer.count)));
+	if text_buffer.content_type != .File_Dialog {
+		log_error("Got file dialog button inside non file dialog buffer");
+	} else {
+		array_reset(*text_buffer.buffer);
+		for text_buffers {
+			if text_buffer.buffer.data == it.buffer.data remove;
+		}
+	}
+	text_buffer = open_buffer_from_file(ctx, filepath);
 	file_dialog_index := find_mode_index(ctx.keybind_root, "file_dialog");
 	if file_dialog_index != -1 {
 		array_ordered_remove_by_value(*ctx.modes, file_dialog_index);
 	}
-	cursor = 0;
-	selection_mark = 0;
+	for text_buffers {
+		array_free(it.buffer);
+		if it.filepath then free(it.filepath);
+	}
+	array_reset_keeping_memory(*text_buffers);
+	cursor = text_buffer.immutable_prefix_size;
+	selection_mark = cursor;
 	should_render = true;
 }
 
@@ -649,12 +700,7 @@ main :: () {
 	ctx.current_keybind = *ctx.keybind_root.root;
 	font = TTF_OpenFont(font_path, 16);
 	if args.count > 1 {
-		content, ok := read_entire_file(args[1], zero_terminated = true);
-		if !ok {
-			log_error("Can't open file %", args[1]);
-		} else {
-			array_add(*text_buffer, ..cast([]u8)content);
-		}
+		text_buffer = open_buffer_from_file(*ctx, args[1]);
 	}
 	event: SDL_Event;
 	create_textures(*ctx);
@@ -734,7 +780,7 @@ main :: () {
 				case .TEXT_INPUT;
 				text := to_string(event.text.text);
 				for byte: text {
-					array_insert_at(*text_buffer, byte, xx cursor);
+					array_insert_at(*text_buffer.buffer, byte, xx cursor);
 					if selection_mark >= cursor
 						selection_mark += 1;
 					cursor += 1;
@@ -743,13 +789,13 @@ main :: () {
 				should_render = true;
 				case .MOUSE_MOTION;
 				if event.motion.state & .LEFT {
-					new_cursor := clamp(point_to_cursor(*ctx, event.mouse.x, event.mouse.y), 0, text_buffer.count);
+					new_cursor := clamp(point_to_cursor(*ctx, event.mouse.x, event.mouse.y), text_buffer.immutable_prefix_size, text_buffer.buffer.count);
 					if new_cursor != cursor
 						should_render = true;
 					cursor = new_cursor;
 				}
 				case .MOUSE_BUTTON_DOWN;
-				cursor = clamp(point_to_cursor(*ctx, event.mouse.x, event.mouse.y), 0, text_buffer.count);
+				cursor = clamp(point_to_cursor(*ctx, event.mouse.x, event.mouse.y), text_buffer.immutable_prefix_size, text_buffer.buffer.count);
 				selection_mark = cursor;
 				required_cursor_width = -1;
 				should_render = true;

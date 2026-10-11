@@ -41,6 +41,7 @@ SDL_Scancode :: enum u32 {
         I :: 12;
 	L :: 15;
 	M :: 16;
+	N :: 17;
 	S :: 22;
 	X :: 27;
 	RETURN :: 40;

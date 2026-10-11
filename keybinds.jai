@@ -1,3 +1,15 @@
+// This is by far the most complicated thing in the project. I wanted to replicate
+// emacs' key sequences system with intention of using with modes by default.
+// The result is a very cursed and poorly documented tree generator and traversal
+// with semi-bitmasks[1] layering. Please, check keybinds_test.jai if it exists
+// to understand how it works.
+
+// [1] - Modes were just a bitmask, but it made "shadowing" not possible so I gave
+// up and made it a dynamic array of indexes. Probably not a very smart idea, but
+// it is what it is.
+
+// TODO(c4llv07e): Add a global leaf for C-g keybind.
+
 #module_parameters ($key_type: Type = u32, $string_to_key: (string) -> $key_type = string_to_u32) () {}
 
 Keybind_Callback :: #type ();
@@ -14,7 +26,13 @@ Keybind :: struct {
 	key: key_type;
 	mod: Modifier;
 	next: [..]Keybind;
-	command: string;
+	commands: [..]string;
+	mask: s64; // Mask of modes indexes. Puts hard restrain on modes count.
+}
+
+Keybind_Root :: struct {
+	root: Keybind;
+	modes: [..]string;
 }
 
 string_to_u32 :: (s: string) -> u32 {
@@ -74,73 +92,155 @@ parse_combo :: (combo: string) -> key: key_type, mod: Modifier {
 	return 0, 0;
 }
 
-walk_key :: (keybind: *Keybind, key: key_type, mod: Modifier) -> *Keybind {
-	for * next: keybind.next {
-		if next.mod == mod && next.key == key {
-			return next;
+calculate_modes_indexes :: (root: Keybind_Root, mode_names: []string) -> [..]s64 {
+	res: [..]s64;
+	for name, name_index: mode_names {
+		name_index := find_mode_index(root, name);
+		assert(name_index != -1);
+		array_add(*res, cast(s64)name_index);
+	}
+	return res;
+}
+
+walk_key :: (keybind: *Keybind, key: key_type, mod: Modifier, mode_indexes: []s64) -> *Keybind {
+	for mode: mode_indexes {
+		for * next: keybind.next {
+			if (next.mask & (1 << mode)) == 0 continue;
+			if next.mod == mod && next.key == key {
+				return next;
+			}
 		}
 	}
 	return null;
 }
 
-generate_keybinds :: (filepath: string) -> Keybind {
+check_keybind_leaf :: (keybind: *Keybind, mode_indexes: []s64) -> command: string, ok: bool {
+	for mode_index: mode_indexes {
+		if keybind.commands.count <= mode_index continue;
+		if keybind.commands[mode_index].count > 0 return keybind.commands[mode_index], true;
+	}
+	return "", false;
+}
+
+find_mode_index :: (root: Keybind_Root, name: string) -> s64 {
+	for root.modes {
+		if it == name {
+			return it_index;
+		}
+	}
+	return -1;
+}
+
+// Taken from Basic/string_to_float.jai
+clz64 :: (x: u64) -> n: s32 {
+	if !x return 64;
+	n: s32;
+	mask: u64 = 0x8000_0000_0000_0000;
+	while !(x & mask) {
+		n += 1;
+		mask = mask >> 1;
+	}
+	return n;
+}
+
+count_power_base :: (v: s64) -> s64 {
+	return (size_of(type_of(v)) * 8) - clz64(cast(u64)v);
+}
+
+// Uses default allocator, doesn't change it any way, feel free to use (,, temp) if you wish.
+generate_keybinds :: (filepath: string) -> Keybind_Root {
 	content, ok := read_entire_file(filepath);
 	if !ok {
 		print("Can't read keybinds file %!\n", filepath);
 		return .{};
 	}
-	root := Keybind.{};
+	current_mode_index := 0;
+	root := Keybind_Root.{};
+	array_add(*root.modes, copy_string("-"));
 	while true {
 		line, found_line := consume_next_line(*content);
 		if !found_line break;
-		trimmed_line := trim(line);
+		line_without_comments := stop_at_any(line, "#");
+		trimmed_line := trim(line_without_comments);
 		if trimmed_line.count <= 0 continue;
-		if begins_with(trimmed_line, "#") continue;
-		found, keys, command := split_from_right(line, #char " ");
-		if !found {
-			log_error("Can't split commands and keys on line '%'", line);
-		}
-		if command.count == 0 || keys.count == 0 {
-			log_error("Found only one word on line '%'", line);
-		}
-		parent := *root;
-		remaing := keys;
-		for 0..100 {
-			remaing = trim(remaing);
-			if remaing.count <= 0 break;
-			found: bool;
-			combo: string;
-			found, combo, remaing = split_from_right(remaing, #char " ");
+		if trimmed_line[0] == #char "[" {
+			if trimmed_line[trimmed_line.count - 1] != #char "]" {
+				log_error("Line '%' must end with ]", line);
+				continue;
+			}
+			untrimmed_mode_name := advance(trimmed_line);
+			untrimmed_mode_name.count -= 1;
+			mode_name := trim(untrimmed_mode_name);
+			if mode_name.count <= 0 {
+				log_error("Empty mode name is not supported, line '%'", line);
+				continue;
+			}
+			mode_index := find_mode_index(root, mode_name);
+			if mode_index == -1 {
+				array_add(*root.modes, copy_string(mode_name));
+				mode_index = root.modes.count - 1;
+			}
+			current_mode_index = mode_index;
+			continue;
+		} else {
+			found, keys, command := split_from_right(trimmed_line, #char " ");
 			if !found {
-				combo = remaing;
-				remaing.count = 0;
+				log_error("Can't split commands and keys on line '%'", line);
+				continue;
 			}
-			combo = trim(combo);
-			key, mod := parse_combo(combo);
-			found_index: s64 = -1;
-			for child, child_index: parent.next {
-				if child.key == key && child.mod == mod {
-					found_index = child_index;
+			if command.count == 0 || keys.count == 0 {
+				log_error("Found only one word on line '%'", line);
+				continue;
+			}
+			parent := *root.root;
+			parent.mask |= (1 << current_mode_index);
+			remaing := keys;
+			for 0..100 {
+				remaing = trim(remaing);
+				if remaing.count <= 0 break;
+				found: bool;
+				combo: string;
+				found, combo, remaing = split_from_right(remaing, #char " ");
+				if !found {
+					combo = remaing;
+					remaing.count = 0;
 				}
+				combo = trim(combo);
+				key, mod := parse_combo(combo);
+				if !key {
+					log_error("probably error on parsing combo '%', value wasn't initialized", combo);
+				}
+				found_index: s64 = -1;
+				for child, child_index: parent.next {
+					if child.key == key && child.mod == mod {
+						found_index = child_index;
+					}
+				}
+				if found_index == -1 {
+					found_index = parent.next.count;
+					array_add(*parent.next, New(Keybind));
+					parent.next[found_index].key = key;
+					parent.next[found_index].mod = mod;
+					parent.next[found_index].mask = (1 << current_mode_index);
+				}
+				parent = *parent.next[found_index];
+				if parent.commands.count > current_mode_index && parent.commands[current_mode_index].count > 0 {
+					// Good luck finding this keybind, because we have no trace back from this!
+					// TODO(c4llv07e): Make somehow traverse keybinds back to generate usefull message about duplicates.
+					log_error("Keybind % already have a command, but was tried to rebind by line '%'", parent.*, line);
+					return root;
+				}
+				parent.mask |= (1 << current_mode_index);
 			}
-			if found_index == -1 {
-				found_index = parent.next.count;
-				array_add(*parent.next, New(Keybind));
-				parent.next[found_index].key = key;
-				parent.next[found_index].mod = mod;
-			}
-			parent = *parent.next[found_index];
-			if parent.command {
-				// Good luck finding this keybind, because we have no trace back from this!
-				log_error("Keybind % already have a command, but was tried to rebind by line '%'", parent.*, line);
-				return root;
-			}
+			modes_count := count_power_base(parent.mask);
+			array_resize(*parent.commands, modes_count);
+			parent.commands[current_mode_index] = command;
 		}
-		parent.command = command;
 	}
 	return root;
 }
 
+Math :: #import "Math";
 #import "Text_File_Handler";
 #import "String";
 #import "Basic";

@@ -1,14 +1,5 @@
 // Simple Text Editor
 
-// TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
-// TODO(c4llv07e): ring buffer Undo-redo.
-// TODO(c4llv07e): Profile everything.
-// TODO(c4llv07e): Store buffer modification state in undo ring
-// TODO(c4llv07e): Make file selection in file dialog with some duct tape.
-// TODO(c4llv07e): It seems like we still need floating dialog for search, goto line, etc. actions.
-
-// NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
-
 #if true {
 	font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
 } else {
@@ -16,6 +7,51 @@
 }
 SCROLL_MOD :: 30;
 HARD_LOCK_CHECK :: false;
+
+// Development notes:
+//-----------------------------
+
+// TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
+// TODO(c4llv07e): ring buffer Undo-redo.
+// TODO(c4llv07e): Profile everything.
+// TODO(c4llv07e): Store buffer modification state in undo ring
+// TODO(c4llv07e): Make file selection in file dialog with some duct tape.
+// TODO(c4llv07e): It seems like we still need floating dialog for search, goto line, etc. actions.
+// TODO(c4llv07e): Someday make ux better, so it wouldn't search for hardcoded font_path, for example.
+
+// NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
+
+// Needs to define a robust abstraction over text framework. It is easier for me to think when
+// I write it.
+// So we need an ability to change *some* text that could be a current text buffer, dialog box,
+// or another buffers hidden right now. It also should be a contineous memory buffer that
+// preferably would be just a utf32 string, but it would require to make more complicated
+// memory representation. On the other hand, it can't be just direct memory mapping of a file,
+// because of CRLF, encodings, raw bytes, etc. So maybe it is the only way?
+// Emacs stores it in utf-32-ish way with some space for raw bytes (Don't know why they don't
+// use ascii bytes directly).
+//
+// Right now it is needed for:
+// 1. Movement code, that will probably fix constant and error prone immutable_prefix_size check.
+// 2. Text modification, but it is already fixed enough with insert/delete_text.
+// 3. State management, because current file_dialog code is very big mess with duct tape.
+//
+// But what about mouse? Tbh, it makes life complicated for zero reasons. T_T
+//
+// Honestly, I can't even tell now why it is considered "*simple* text editor" if it just a less
+// cool version of editor.c. Was it all just for playground testing so I understand that
+// pre calculating visual lines is a good idea?
+
+// NOTE(c4llv07e): About undo file modification status. There could be only one valid "unmodified"
+// state, that will move to the current one on save (previous shouldn't be considered after save).
+// So maybe modification variable should be not bool, but rather an index in undos list and when
+// it equals to the current undo cursor, it means buffer wasn't modified yet. Sounds logical.
+// But I am not sure about insert_text_no_undo(), it still can change buffer state and will not
+// do anything with undo ring, therefore invalidating index. Maybe it isn't that important?
+// After all, inappropriate use of _no_undo suffix will break undo ring even worse.
+
+//-------------------------------
+// End of development notes.
 
 linecol_padding :: 2;
 

@@ -3,21 +3,21 @@
 // TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
 // TODO(c4llv07e): ring buffer Undo-redo.
 // TODO(c4llv07e): Profile everything.
-// TODO(c4llv07e): Selection mark animations.
 // TODO(c4llv07e): Store buffer modification state in undo ring
-// TODO(c4llv07e): Store font_height as a variable and don't query it each time.
 // TODO(c4llv07e): Make file selection in file dialog with some duct tape.
 // TODO(c4llv07e): It seems like we still need floating dialog for search, goto line, etc. actions.
 
 // NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
 
-#if false {
+#if true {
 	font_path :: "/usr/share/fonts/TTF/liberation/LiberationMono-Regular.ttf";
 } else {
 	font_path :: "/usr/share/fonts/TTF/liberation/LiberationSans-Regular.ttf";
 }
 SCROLL_MOD :: 30;
 HARD_LOCK_CHECK :: false;
+
+linecol_padding :: 2;
 
 Visual_Line :: struct {
 	real_line_number: s64;
@@ -65,11 +65,14 @@ Ctx :: struct {
 	window: *SDL_Window;
 	renderer: *SDL_Renderer;
 	font: *TTF_Font;
+	font_height: s64;
 	space_texture: *SDL_Texture;
 	tab_texture: *SDL_Texture;
 	window_width, window_height: s64;
 	required_cursor_width: s64;
-	selection_mark: s64; // I think it shouldn't have an animation.
+	selection_mark: s64;
+	selection_mark_interp: SDL_FPoint;
+	real_selection_mark_position: SDL_FPoint;
 	cursor: s64;
 	cursor_interp: SDL_FPoint;
 	real_cursor_position: SDL_FPoint;
@@ -110,9 +113,8 @@ update_cursor_scroll :: (using ctx: *Ctx) {
 		// Strange, but ok.
 		return;
 	}
-	font_height := TTF_GetFontHeight(font);
 	cursor_height := (cursor_visline * font_height);
-	if cursor_height < xx scroll || cursor_height > xx scroll + window_height {
+	if cursor_height < xx scroll || cursor_height > xx scroll + window_height - font_height * 2 {
 		scroll = xx (cursor_height - (window_height / 2));
 	}
 }
@@ -264,7 +266,6 @@ draw_fancy_text :: (using ctx: *Ctx, x: float, y: float, text: string, color: SD
 	special_chars :: " \t";
 	sv := text;
 	space_width := sdl_char_width(font, #char " ");
-	font_height := TTF_GetFontHeight(font);
 	while true {
 		match := find_index_of_any_from_left(sv, special_chars);
 		if match == -1 {
@@ -329,7 +330,6 @@ draw_on_left :: (using ctx: *Ctx, y: float32, text: string, color: SDL_Color = .
 
 update_real_cursor_position :: (using ctx: *Ctx) {
 	if visual_lines {
-		font_height := TTF_GetFontHeight(font);
 		cursor_visline_index := offset_to_visline_index(ctx, cursor);
 		if cursor_visline_index == -1 {
 			real_cursor_position = .{line_number_width, 0};
@@ -348,6 +348,26 @@ update_real_cursor_position :: (using ctx: *Ctx) {
 	}
 }
 
+update_selection_mark_position :: (using ctx: *Ctx) {
+	if visual_lines {
+		selection_mark_visline_index := offset_to_visline_index(ctx, selection_mark);
+		if selection_mark_visline_index == -1 {
+			real_selection_mark_position = .{line_number_width, 0};
+			return;
+		}
+		selection_mark_visline := visual_lines[selection_mark_visline_index];
+		before_selection_mark_string_length := (selection_mark - selection_mark_visline.start_byte_offset);
+		width: s32;
+		if before_selection_mark_string_length > 0
+			width = measure_string_with_tab(ctx, font, slice(cast(string)text_buffer.buffer, selection_mark_visline.start_byte_offset, before_selection_mark_string_length));
+		else
+			width = 0;
+		real_selection_mark_position = .{line_number_width + xx width, xx ((selection_mark_visline_index * font_height) - scroll_interp)};
+	} else {
+		real_selection_mark_position = .{line_number_width, - scroll_interp};
+	}
+}
+
 copy_to_clipboard :: (text: string) {
 	SDL_SetClipboardText(to_c_string(text,, temp));
 }
@@ -360,7 +380,7 @@ render :: (using ctx: *Ctx) {
 		return;
 	}
 	update_real_cursor_position(ctx);
-	font_height := TTF_GetFontHeight(font);
+	update_selection_mark_position(ctx);
 	sdl_set_color(renderer, .{0x20, 0x20, 0x20, 0xff});
 	SDL_RenderClear(renderer);
 	max_real_line_number := 0;
@@ -405,62 +425,52 @@ render :: (using ctx: *Ctx) {
 		}
 		draw_on_left(ctx, xx (font_height * 7), tprint("% - %", text_buffer.undos.count, text_buffer.undos_cursor));
 	}
-	static_cursor_width := max(1.0, font_height / 8.0);
-	cursor_width := max(static_cursor_width, SDL_logf(length_squared(real_cursor_position - cursor_interp)));
-	cursor_interp_rect := SDL_FRect.{cursor_interp.x - cursor_width / 2, cursor_interp.y, cursor_width, xx font_height};
-	{ // Selection mark
-		selection_visline_index := offset_to_visline_index(ctx, selection_mark);
-		selection_mark_pos := SDL_FRect.{line_number_width, 0.0, static_cursor_width, xx font_height};
-		if selection_visline_index != -1 {
-			selection_mark_pos.y = (selection_visline_index * font_height) - scroll_interp;
-			width: s32 = 0;
-			selection_visline := visual_lines[selection_visline_index];
-			before_selection_length := (selection_mark - selection_visline.start_byte_offset);
-			if before_selection_length > 0 {
-				width = measure_string_with_tab(ctx, font, slice(cast(string)text_buffer.buffer,
-										 selection_visline.start_byte_offset,
-										 before_selection_length));
-			}
-			selection_mark_pos.x = line_number_width + xx width;
-		}
-		selection_mark_pos.x -= selection_mark_pos.w / 2;
-		fill_rect(renderer, selection_mark_pos, .{0xff, 0xff, 0x00, 0xff});
+	static_cursor_width := max(1.0, font_height / 15.0);
+	{ // selection_mark
+		selection_mark_dist_x := SDL_fabsf(real_selection_mark_position.x - selection_mark_interp.x);
+		selection_mark_width := max(static_cursor_width, SDL_logf(selection_mark_dist_x * selection_mark_dist_x * selection_mark_dist_x));
+		selection_mark_interp_rect := SDL_FRect.{selection_mark_interp.x - selection_mark_width / 2, selection_mark_interp.y, selection_mark_width, xx font_height};
+		fill_rect(renderer, selection_mark_interp_rect, .{0xff, 0xff, 0x00, 0xff});
 		selection_mark_dot_size := font_height / 7;
 		if cursor <= selection_mark {
 			fill_rect(renderer,
-				  .{selection_mark_pos.x - selection_mark_dot_size,
-					  selection_mark_pos.y + font_height - selection_mark_dot_size,
+				  .{selection_mark_interp_rect.x - selection_mark_dot_size,
+					  selection_mark_interp_rect.y + selection_mark_interp_rect.h - selection_mark_dot_size,
 					  xx selection_mark_dot_size,
 					  xx selection_mark_dot_size},
 				  .{0xff, 0xff, 0x00, 0Xff});
 		} else {
 			fill_rect(renderer,
-				  .{selection_mark_pos.x + selection_mark_pos.w,
-					  selection_mark_pos.y,
+				  .{selection_mark_interp_rect.x + selection_mark_interp_rect.w,
+					  selection_mark_interp_rect.y,
 					  xx selection_mark_dot_size,
 					  xx selection_mark_dot_size},
 				  .{0xff, 0xff, 0x00, 0Xff});
 		}
 	}
-	fill_rect(renderer, cursor_interp_rect, .{0x00, 0xff, 0x00, 0xff});
-	cursor_selection_dir_line_width := font_height / 3;
-	cursor_selection_dir_line_height := font_height / 7;
-	if cursor <= selection_mark {
-		fill_rect(renderer,
-			  .{cursor_interp_rect.x + cursor_interp_rect.w,
-				  cursor_interp_rect.y,
-				  xx cursor_selection_dir_line_width,
-				  xx cursor_selection_dir_line_height},
-			  .{0x00, 0xff, 0x00, 0xff});
-	} else {
-		fill_rect(renderer,
-			  .{cursor_interp_rect.x - cursor_selection_dir_line_width,
-				  cursor_interp_rect.y + font_height - cursor_selection_dir_line_height,
-				  xx cursor_selection_dir_line_width,
-				  xx cursor_selection_dir_line_height},
-			  .{0x00, 0xff, 0x00, 0xff});
+	{ // cursor
+		cursor_diff_dist_x := SDL_fabsf(real_cursor_position.x - cursor_interp.x);
+		cursor_width := max(static_cursor_width, SDL_logf(cursor_diff_dist_x * cursor_diff_dist_x * cursor_diff_dist_x));
+		cursor_interp_rect := SDL_FRect.{cursor_interp.x - cursor_width / 2, cursor_interp.y, cursor_width, xx font_height};
+		fill_rect(renderer, cursor_interp_rect, .{0x00, 0xff, 0x00, 0xff});
+		cursor_selection_dir_line_width := font_height / 3;
+		cursor_selection_dir_line_height := font_height / 7;
+		if cursor <= selection_mark {
+			fill_rect(renderer,
+				  .{cursor_interp_rect.x + cursor_interp_rect.w,
+					  cursor_interp_rect.y,
+					  xx cursor_selection_dir_line_width,
+					  xx cursor_selection_dir_line_height},
+				  .{0x00, 0xff, 0x00, 0xff});
+		} else {
+			fill_rect(renderer,
+				  .{cursor_interp_rect.x - cursor_selection_dir_line_width,
+					  cursor_interp_rect.y + cursor_interp_rect.h - cursor_selection_dir_line_height,
+					  xx cursor_selection_dir_line_width,
+					  xx cursor_selection_dir_line_height},
+				  .{0x00, 0xff, 0x00, 0xff});
+		}
 	}
-	linecol_padding :: 2;
 	linecol_panel_rect := SDL_FRect.{line_number_width, xx (window_height - font_height - linecol_padding * 2), xx (window_width - line_number_width), xx (font_height + linecol_padding * 2)};
 	fill_rect(renderer, linecol_panel_rect, .{0x20, 0x30, 0x20, 0xff});
 	draw_rect_lines(renderer, linecol_panel_rect, .{0x30, 0x40, 0x30, 0xff});
@@ -488,7 +498,6 @@ check_sdl :: (status: bool, msg := "Error on calling sdl function", caller_loc :
 
 point_to_cursor :: (using ctx: *Ctx, point_x: float32, point_y: float32) -> s64 {
 	y := 0.0;
-	font_height := TTF_GetFontHeight(font);
 	sv := cast(string)text_buffer.buffer;
 	point_y += scroll_interp;
 	point_x -= line_number_width;
@@ -505,6 +514,10 @@ point_to_cursor :: (using ctx: *Ctx, point_x: float32, point_y: float32) -> s64 
 
 create_textures :: (using ctx: *Ctx) {
 	{ // space
+		if space_texture != null {
+			SDL_DestroyTexture(space_texture);
+			space_texture = null;
+		}
 		space_surface := TTF_RenderGlyph_Blended(font, #char ".", color_dim_by(.{0xe3, 0xe3, 0xe3, 0xff}, 2));
 		assert(space_surface != null, "Can't generate space surface!");
 		defer SDL_DestroySurface(space_surface);
@@ -512,6 +525,10 @@ create_textures :: (using ctx: *Ctx) {
 		assert(space_texture != null, "Can't generate space texture!");
 	}
 	{ // tab
+		if tab_texture != null {
+			SDL_DestroyTexture(tab_texture);
+			tab_texture = null;
+		}
 		tab_text :: ">>      ";
 		assert(tab_text.count == tab_width, "Tab texture size isn't aligned with tab_width");
 		tab_surface := TTF_RenderText_Blended(font, tab_text.data, tab_text.count, color_dim_by(.{0xe3, 0xe3, 0xe3, 0xff}, 2));
@@ -589,6 +606,7 @@ go_left :: (using ctx: *Ctx) {
 		required_cursor_width = -1;
 		should_render = true;
 	}
+	update_cursor_scroll(ctx);
 }
 
 go_right :: (using ctx: *Ctx) {
@@ -600,6 +618,7 @@ go_right :: (using ctx: *Ctx) {
 		required_cursor_width = -1;
 		should_render = true;
 	}
+	update_cursor_scroll(ctx);
 }
 
 remove_previous_char :: (using ctx: *Ctx) {
@@ -693,6 +712,7 @@ open_file_dialog :: (using ctx: *Ctx) {
 	try_enable_mode(ctx, "file_dialog");
 	cursor = text_buffer.buffer.count;
 	selection_mark = text_buffer.immutable_prefix_size;
+	update_cursor_scroll(ctx);
 	should_render = true;
 }
 
@@ -734,6 +754,7 @@ file_dialog_enter :: (using ctx: *Ctx) {
 			text_buffer.filepath = copy_string(filepath);
 			write_entire_file(filepath, cast(string)text_buffer.buffer);
 			text_buffer.modified = false;
+			update_cursor_scroll(ctx);
 			should_render = true;
 			return;
 		}
@@ -751,6 +772,7 @@ file_dialog_enter :: (using ctx: *Ctx) {
 	array_reset_keeping_memory(*text_buffers);
 	cursor = text_buffer.immutable_prefix_size;
 	selection_mark = cursor;
+	update_cursor_scroll(ctx);
 	should_render = true;
 }
 
@@ -782,6 +804,7 @@ abort_file_dialog :: (using ctx: *Ctx) {
 	try_disable_mode(ctx, "file_dialog");
 	cursor = text_buffer.immutable_prefix_size;
 	selection_mark = cursor;
+	update_cursor_scroll(ctx);
 }
 
 prompt_and_save :: (using ctx: *Ctx) {
@@ -800,6 +823,7 @@ prompt_and_save :: (using ctx: *Ctx) {
 	cursor = text_buffer.buffer.count;
 	selection_mark = text_buffer.immutable_prefix_size;
 	should_render = true;
+	update_cursor_scroll(ctx);
 }
 
 save_path_or_prompt :: (using ctx: *Ctx) {
@@ -882,6 +906,7 @@ go_next_paragraph :: (using ctx: *Ctx) {
 		}
 		cursor += cp_size;
 	}
+	update_cursor_scroll(ctx);
 }
 
 go_previous_paragraph :: (using ctx: *Ctx) {
@@ -906,6 +931,7 @@ go_previous_paragraph :: (using ctx: *Ctx) {
 		}
 	}
 	if newlines_count >= 2 then cursor += last_cp_size;
+	update_cursor_scroll(ctx);
 }
 
 go_left_word :: (using ctx: *Ctx) {
@@ -953,6 +979,33 @@ go_right_word :: (using ctx: *Ctx) {
 	}
 }
 
+// Just a copy of go_left_word.
+remove_previous_word :: (using ctx: *Ctx) {
+	if cursor <= text_buffer.immutable_prefix_size return;
+	to := cursor;
+	if !utf8_step_back(cast(string)text_buffer.buffer, *cursor) return;
+	should_render = true;
+	cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+	assert(ok == .CONVERSION_OK);
+	started_in_word := utf32_is_word_character(cp);
+	while cursor > text_buffer.immutable_prefix_size {
+		if !utf8_step_back(cast(string)text_buffer.buffer, *cursor) return;
+		cp, cp_size, ok = character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+		assert(ok == .CONVERSION_OK);
+		if utf32_is_word_character(cp) {
+			if !started_in_word {
+				started_in_word = true;
+			}
+		} else {
+			if started_in_word {
+				cursor += cp_size;
+				break;
+			}
+		}
+	}
+	delete_text(ctx, *text_buffer, cursor, to - cursor, .Keyboard);
+}
+
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 	// I know what you think, but I'm doing it so I can do more than just
 	// calling existing functions there.
@@ -979,6 +1032,8 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		go_right_word(ctx);
 		case "remove_previous_char";
 		remove_previous_char(ctx);
+		case "remove_previous_word";
+		remove_previous_word(ctx);
 		case "set_mark";
 		set_mark(ctx);
 		case "swap_mark_with_cursor";
@@ -1038,7 +1093,8 @@ main :: () {
 	ctx.keybind_root = generate_keybinds(tprint("%1%2", program_path, "keybinds.conf"));
 	array_add(*ctx.modes, 0);
 	ctx.current_keybind = *ctx.keybind_root.root;
-	font = TTF_OpenFont(font_path, 16);
+	font = TTF_OpenFont(font_path, 15);
+	font_height = TTF_GetFontHeight(font);
 	if args.count > 1 {
 		text_buffer = open_buffer_from_file(*ctx, args[1]);
 	}
@@ -1100,7 +1156,6 @@ main :: () {
 					if (next_size >= 1.0) {
 						// TODO(c4llv07e): Fix resizing breaking because of visual line jumping.
 #if false { // I hate visual and non-visual lines...
-							font_height := TTF_GetFontHeight(font);
 							line_index := SDL_floorf(scroll / font_height);
 							line_offset := SDL_fmodf(scroll, xx font_height) / font_height;
 							TTF_SetFontSize(font, next_size);
@@ -1109,7 +1164,9 @@ main :: () {
 						} else {
 							TTF_SetFontSize(font, next_size);
 							scroll *= (next_size / font_size);
+							font_height = TTF_GetFontHeight(font);
 						}
+						create_textures(*ctx);
 						scroll_interp = scroll;
 						should_render = true;
 					}
@@ -1143,11 +1200,18 @@ main :: () {
 			scroll_interp = scroll;
 		}
 		if length_squared(real_cursor_position - cursor_interp) >= 0.00001 {
-			cursor_interp = lerp(cursor_interp, real_cursor_position, 64 * deltatime);
+			cursor_interp = lerp(cursor_interp, real_cursor_position, min(1.0, 128 * deltatime));
 			should_render = true;
 		} else {
 			if cursor_interp != real_cursor_position then should_render = true;
 			cursor_interp = real_cursor_position;
+		}
+		if length_squared(real_selection_mark_position - selection_mark_interp) >= 0.00001 {
+			selection_mark_interp = lerp(selection_mark_interp, real_selection_mark_position, min(1.0, 128 * deltatime));
+			should_render = true;
+		} else {
+			if selection_mark_interp != real_selection_mark_position then should_render = true;
+			selection_mark_interp = real_selection_mark_position;
 		}
 		if should_render {
 			calculate_vislines(*ctx);

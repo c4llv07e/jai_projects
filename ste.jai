@@ -1,12 +1,13 @@
 // Simple Text Editor
 
 // TODO(c4llv07e): Somewhere in the future add different encoding and line ending settings.
-// TODO(c4llv07e): More keybinds for text movement.
 // TODO(c4llv07e): ring buffer Undo-redo.
 // TODO(c4llv07e): Profile everything.
 // TODO(c4llv07e): Selection mark animations.
-// TODO(c4llv07e): Store buffer modification in undo ring
+// TODO(c4llv07e): Store buffer modification state in undo ring
 // TODO(c4llv07e): Store font_height as a variable and don't query it each time.
+// TODO(c4llv07e): Make file selection in file dialog with some duct tape.
+// TODO(c4llv07e): It seems like we still need floating dialog for search, goto line, etc. actions.
 
 // NOTE(c4llv07e): Maybe there should be a primary selection like in most X11 text editors?
 
@@ -601,18 +602,6 @@ go_right :: (using ctx: *Ctx) {
 	}
 }
 
-#if false {
-	go_left_word :: (using ctx: *Ctx) {
-		if cursor > text_buffer.immutable_prefix_size {
-			cp, ok := utf8_step_back(cast(string)text_buffer.buffer, *cursor);
-			should_render = true;
-			while cursor > 0 && is_alpha(cp) && is_digit(text_buffer.buffer[cursor]) {
-				cursor -= 1;
-			}
-		}
-	}
-}
-
 remove_previous_char :: (using ctx: *Ctx) {
 	from := cursor;
 	while from > text_buffer.immutable_prefix_size && ((text_buffer.buffer.data[from - 1] & 0xc0) == 0x80) {
@@ -869,6 +858,101 @@ redo :: (using ctx: *Ctx, tb: *Text_Buffer = null) {
 	should_render = true;
 }
 
+is_space :: (c: u32) -> bool {
+	return c == #char " " || c == #char "\t" || c == #char "\r" || c == #char "\n";
+}
+
+go_next_paragraph :: (using ctx: *Ctx) {
+	should_render = true;
+	// going until not a paragraph delim
+	while cursor < text_buffer.buffer.count {
+		cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+		assert(ok == .CONVERSION_OK);
+		if !is_space(cp) break;
+		cursor += cp_size;
+	}
+	newlines_count := 0;
+	while cursor < text_buffer.buffer.count {
+		cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+		assert(ok == .CONVERSION_OK);
+		if cp == #char "\n" newlines_count += 1;
+		else if !is_space(cp) newlines_count = 0;
+		if newlines_count >= 2 {
+			break;
+		}
+		cursor += cp_size;
+	}
+}
+
+go_previous_paragraph :: (using ctx: *Ctx) {
+	should_render = true;
+	newlines_count := 0;
+	last_cp_size: s64 = 0;
+	while cursor > text_buffer.immutable_prefix_size {
+		cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+		assert(ok != .SOURCE_ILLEGAL);
+		if !is_space(cp) break;
+		utf8_step_back(cast(string)text_buffer.buffer, *cursor);
+	}
+	while cursor > text_buffer.immutable_prefix_size {
+		utf8_step_back(cast(string)text_buffer.buffer, *cursor);
+		cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+		assert(ok == .CONVERSION_OK);
+		last_cp_size = cp_size;
+		if cp == #char "\n" newlines_count += 1;
+		else if !is_space(cp) newlines_count = 0;
+		if newlines_count >= 2 {
+			break;
+		}
+	}
+	if newlines_count >= 2 then cursor += last_cp_size;
+}
+
+go_left_word :: (using ctx: *Ctx) {
+	if cursor <= text_buffer.immutable_prefix_size return;
+	if !utf8_step_back(cast(string)text_buffer.buffer, *cursor) return;
+	should_render = true;
+	cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+	assert(ok == .CONVERSION_OK);
+	started_in_word := utf32_is_word_character(cp);
+	while cursor > text_buffer.immutable_prefix_size {
+		if !utf8_step_back(cast(string)text_buffer.buffer, *cursor) return;
+		cp, cp_size, ok = character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+		assert(ok == .CONVERSION_OK);
+		if utf32_is_word_character(cp) {
+			if !started_in_word {
+				started_in_word = true;
+			}
+		} else {
+			if started_in_word {
+				cursor += cp_size;
+				break;
+			}
+		}
+	}
+}
+
+go_right_word :: (using ctx: *Ctx) {
+	cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+	if ok == .SOURCE_EXHAUSTED return;
+	should_render = true;
+	started_in_word := utf32_is_word_character(cp);
+	while cursor < text_buffer.buffer.count {
+		cp, cp_size, ok := character_utf8_to_utf32(*text_buffer.buffer.data[cursor], text_buffer.buffer.count - cursor, true);
+		assert(ok == .CONVERSION_OK);
+		if utf32_is_word_character(cp) {
+			if !started_in_word {
+				started_in_word = true;
+			}
+		} else {
+			if started_in_word {
+				break;
+			}
+		}
+		cursor += cp_size;
+	}
+}
+
 handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 	// I know what you think, but I'm doing it so I can do more than just
 	// calling existing functions there.
@@ -885,6 +969,14 @@ handle_command :: (using ctx: *Ctx, command: string) -> ok: bool {
 		go_left(ctx);
 		case "go_right";
 		go_right(ctx);
+		case "go_next_paragraph";
+		go_next_paragraph(ctx);
+		case "go_previous_paragraph";
+		go_previous_paragraph(ctx);
+		case "go_left_word";
+		go_left_word(ctx);
+		case "go_right_word";
+		go_right_word(ctx);
 		case "remove_previous_char";
 		remove_previous_char(ctx);
 		case "set_mark";

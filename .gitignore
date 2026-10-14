@@ -9,6 +9,7 @@
 /ui
 /imgui
 /ste
+/graph
 /.build/
 *.o
 *.rdi

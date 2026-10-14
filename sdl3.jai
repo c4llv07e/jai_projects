@@ -289,6 +289,7 @@ SDL_RenderPresent :: (renderer: *void) -> bool #foreign sdl3;
 SDL_RenderRect :: (renderer: *SDL_Renderer, rect: *SDL_FRect) -> bool #foreign sdl3;
 SDL_RenderFillRect :: (renderer: *SDL_Renderer, rect: *SDL_FRect) -> bool #foreign sdl3;
 SDL_RenderLine :: (renderer: *SDL_Renderer, x1: float32, y1: float32, x2: float32, y2: float32) -> bool #foreign sdl3;
+SDL_RenderLines :: (renderer: *SDL_Renderer, points: *SDL_FPoint, count: s32) -> bool #foreign sdl3;
 SDL_CreateTextureFromSurface :: (renderer: *SDL_Renderer, surface: *SDL_Surface) -> *SDL_Texture #foreign sdl3;
 SDL_SetRenderDrawBlendMode :: (renderer: *SDL_Renderer, blendMode: SDL_BlendMode) -> int #foreign sdl3;
 SDL_DestroySurface :: (surface: *SDL_Surface) #foreign sdl3;
@@ -327,6 +328,8 @@ SDL_log10f :: (x: float32) -> float32 #foreign sdl3;
 SDL_log10 :: (x: float64) -> float64 #foreign sdl3;
 SDL_fmodf :: (x: float32, y: float32) -> float32 #foreign sdl3;
 SDL_fmod :: (x: float64, y: float64) -> float64 #foreign sdl3;
+SDL_copysignf :: (x: float32, y: float32) -> float32 #foreign sdl3;
+SDL_copysign :: (x: float64, y: float64) -> float64 #foreign sdl3;
 
 #if ENABLE_TTF {
 	sdl3_ttf :: #system_library "libSDL3_ttf.so";
@@ -388,6 +391,11 @@ SDL_fmod :: (x: float64, y: float64) -> float64 #foreign sdl3;
 	sdl_render_line :: (renderer: *SDL_Renderer, from: SDL_FPoint, to: SDL_FPoint, color: SDL_Color) {
 		sdl_set_color(renderer, color);
 		SDL_RenderLine(renderer, from.x, from.y, to.x, to.y);
+	}
+	
+	sdl_render_lines :: (renderer: *SDL_Renderer, lines: []SDL_FPoint, color: SDL_Color) {
+		sdl_set_color(renderer, color);
+		SDL_RenderLines(renderer, lines.data, xx lines.count);
 	}
 	
 	sdl_debug_version_info :: () {
@@ -472,6 +480,26 @@ SDL_fmod :: (x: float64, y: float64) -> float64 #foreign sdl3;
 			width: s32;
 			ok := TTF_GetGlyphMetrics(font, ch, null, null, null, null, *width);
 			return width, ok;
+		}
+		
+		sdl_render_text :: (renderer: *SDL_Renderer, font: *TTF_Font, x: float, y: float, text: string, color: SDL_Color = .{0xe3, 0xe3, 0xe3, 0xff}) -> bool {
+			surface := TTF_RenderText_Blended(font, text.data, cast(u64)text.count, color);
+			if surface == null {
+				return false;
+			}
+			defer SDL_DestroySurface(surface);
+			texture := SDL_CreateTextureFromSurface(renderer, surface);
+			if texture == null {
+				return false;
+			}
+			defer SDL_DestroyTexture(texture);
+			rect := SDL_FRect.{
+				x = x,
+				y = y,
+				w = xx texture.w,
+				h = xx texture.h,
+			};
+			return SDL_RenderTexture(renderer, texture, null, *rect);
 		}
 	}
 }

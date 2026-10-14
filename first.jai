@@ -41,6 +41,7 @@ build :: () {
 	compile_single_file("editor.jai", "editor");
 	compile_single_file("keybinds_test.jai", "keybinds");
 	compile_single_file("ste.jai", "ste");
+	compile_single_file("graph.jai", "graph");
 	set_build_options_dc(.{do_output=false});
 }
 

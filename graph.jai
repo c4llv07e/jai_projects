@@ -25,6 +25,7 @@ Ctx :: struct {
 	graph: Node(Node_Data);
 	camera: SDL_FPoint;
 	camera_scale: float32;
+	keybinds_root: Keybind_Root;
 }
 using ctx: Ctx;
 
@@ -108,8 +109,8 @@ draw_node :: (using node: Node(Node_Data)) {
 	}
 	draw_rect_lines(renderer, screen_rect, .{0xff, 0x00, 0x00, 0xff});
 	if node.text.count > 0
-		sdl_render_text(renderer, font, screen_rect.x, screen_rect.y, node.text);
-	sdl_render_text(renderer, font, screen_rect.x, screen_rect.y + font_height, tprint("%", node.min_size));
+		sdl_render_text(renderer, font, SDL_floorf(screen_rect.x), SDL_floorf(screen_rect.y), node.text);
+	sdl_render_text(renderer, font, SDL_floorf(screen_rect.x), SDL_floorf(screen_rect.y + font_height), tprint("%", node.min_size));
 	// draw_rect_lines(renderer, project_to_camera(SDL_FRect.{node.rect.x + node.rect.w / 2 - node.min_size / 2, node.rect.y, node.min_size, node.rect.h}), .{0x00, 0x00, 0xff, 0xff});
 }
 
@@ -213,6 +214,9 @@ update_required_size :: (using root: *Node(Node_Data), padding: float = 0.0) {
 		min_size += child.min_size + padding;
 	}
 	min_size -= padding;
+	ok, text_width := sdl_measure_string(font, text);
+	rect.w = max(40.0, xx text_width);
+	rect.h = xx (font_height * 2);
 	min_size = max(min_size, rect.w);
 }
 
@@ -227,6 +231,34 @@ reform_graph :: (using root: *Node(Node_Data), padding: float = 0.0, padding_dow
 	}
 }
 
+keybind_tree_to_graph :: (kb: Keybind) -> Node(Node_Data) {
+	res := Node(Node_Data).{text = sprint("(%)-(%)", kb.mod, kb.key)};
+	for kb.commands {
+		com_node := New(Node(Node_Data));
+		com_node.text = copy_string(it);
+		array_add(*res.children, com_node);
+	}
+	for kb.next {
+		child := New(Node(Node_Data));
+		child.* = keybind_tree_to_graph(it);
+		array_add(*res.children, child);
+	}
+	return res;
+}
+
+keybinds_root_to_graph :: (root: Keybind_Root) -> Node(Node_Data) {
+	res := Node(Node_Data).{text = "root"};
+	for mode_name: root.modes {
+		mode_node := New(Node(Node_Data));
+		mode_node.text = copy_string(mode_name);
+		array_add(*res.children, mode_node);
+	}
+	root_node := New(Node(Node_Data));
+	root_node.* = keybind_tree_to_graph(root.root);
+	array_add(*res.children, root_node);
+	return res;
+}
+
 main :: () {
 	ctx = .{
 		window_width = 800,
@@ -234,32 +266,8 @@ main :: () {
 		graph_portion = 0.5,
 		camera_scale = 1.0,
 	};
-	graph.data.rect = .{10, 10, 100, 50};
-	graph.data.text = "main";
-	add_new_node(*graph, .{
-			     rect = .{0, 50, 100, 50},
-			     text = "second",
-		     });
-	add_new_node(*graph, .{
-			     rect = .{100, 50, 100, 50},
-			     text = "third",
-		     });
-	add_new_node(*graph, .{
-			     rect = .{100, 50, 100, 50},
-			     text = "3 node",
-		     });
-	add_new_node(graph.children[0], .{
-			     rect = .{100, 50, 100, 50},
-			     text = "subchild",
-		     });
-	add_new_node(graph.children[1], .{
-			     rect = .{100, 50, 100, 50},
-			     text = "subchild 1",
-		     });
-	add_new_node(graph.children[1], .{
-			     rect = .{100, 50, 100, 50},
-			     text = "subchild 2",
-		     });
+	keybinds_root = generate_keybinds("./keybinds.conf");
+	graph = keybinds_root_to_graph(keybinds_root);
 	check_sdl(SDL_Init(.VIDEO));
 	check_sdl(SDL_CreateWindowAndRenderer("garph", window_width, window_height, .RESIZABLE, *window, *renderer));
 	check_sdl(TTF_Init());
@@ -335,7 +343,20 @@ main :: () {
 					graph_portion += SDL_copysignf(0.1, event.wheel.y);
 					graph_portion = clamp(graph_portion, 0.0, 1.0);
 				} else {
-					camera_scale += event.wheel.y / 10.0;
+#if false {
+						new_font_size := TTF_GetFontSize(font) + SDL_copysignf(1, event.wheel.y);
+						if new_font_size > 1.0 {
+							TTF_SetFontSize(font, new_font_size);
+							font_height = TTF_GetFontHeight(font);
+							camera_scale += event.wheel.y / 10.0;
+							camera_scale = max(camera_scale, 0.01);
+						}
+					} else {
+						camera_scale += event.wheel.y / 10.0;
+						camera_scale = max(camera_scale, 0.01);
+						TTF_SetFontSize(font, camera_scale * 15.0);
+						font_height = TTF_GetFontHeight(font);
+					}
 				}
 				should_render = true;
 			}
@@ -349,6 +370,7 @@ main :: () {
 	Iprof.log_text_report(report);
 }
 
+#import,file "keybinds.jai" (SDL_Keycode, sdl_keycode_from_string);
 Iprof :: #import "Iprof" (.CLIENT, true);
 #import "Math";
 #import,file "sdl3.jai";
